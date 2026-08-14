@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seva's Media Processor</title>
+    <script src="{{ url_for('static', filename='i18n.js') }}"></script>
+    <script>setTimeout(() => { document.body.style.opacity = 1; }, 500);</script>
+    <style>
+        .hidden-frame { display: none !important; }
+
+        body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; margin: 0; display: flex; height: 100vh; background-color: var(--bg-color); opacity: 0; transition: opacity 0.2s; }
+        body.lang-loaded { opacity: 1; }
+
+        :root {
+            --bg-color: #f3f2f1;
+            --text-color: #000000;
+            --hint-color: #555555;
+            --header-color: #005599;
+            --border-color: #ccc;
+            --error-color: #D32F2F;
+            --disabled-bg: #E4E6E9;
+            --disabled-text: #9AA0A6;
+            --disabled-border: #D6D9DD;
+        }
+
+        * {
+
+            scrollbar-width: auto !important;
+            scrollbar-color: #94a3b8 #e2e8f0 !important;
+        }
+        *::-webkit-scrollbar {
+            -webkit-appearance: none !important;
+            width: 18px !important;  
+            height: 18px !important;
+            background-color: #e2e8f0 !important;
+        }
+        *::-webkit-scrollbar-track {
+            -webkit-appearance: none !important;
+            background-color: #e2e8f0 !important;
+            border-radius: 9px !important;
+        }
+        *::-webkit-scrollbar-thumb {
+            -webkit-appearance: none !important;
+            background-color: #94a3b8 !important;
+            border-radius: 9px !important;
+            border: 3px solid #e2e8f0; 
+        }
+        *::-webkit-scrollbar-thumb:hover {
+            background-color: #64748b !important;
+        }
+        *::-webkit-scrollbar-thumb:window-inactive {
+            background-color: #cbd5e1 !important;
+        }
+
+        .alert-banner {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            border: 1px solid #ffcdd2;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-banner.global-alert {
+            margin: 0;
+            border-radius: 5px 5px 0 0;
+            border: none;
+            border-bottom: 1px solid #ffcdd2;
+            padding: 15px 30px;
+            flex-shrink: 0; 
+        }
+
+        #global-error-banner { flex-direction: column; align-items: stretch; gap: 6px; }
+        .banner-row { display: flex; align-items: center; gap: 8px; }
+
+        #global-error-text .banner-jump-btn { margin-right: 8px; }
+        .banner-jump-btn {
+            padding: 4px 12px;
+            border: 1px solid #ef9a9a;
+            background: #ffffff;
+            color: #c62828;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.9em;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .banner-jump-btn:hover { background: #ffcdd2; }
+
+        .alert-banner.warning {
+            background-color: #fff8e1;
+            color: #f57f17;
+            border-color: #ffecb3;
+        }
+
+        .sidebar { width: 250px; background-color: #fff; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; z-index: 20; }
+        .sidebar-tab { padding: 15px 20px; font-weight: bold; cursor: pointer; border-bottom: 1px solid #eee; display: block; text-decoration: none; color: inherit; }
+        .sidebar-tab:hover, .sidebar-tab.active { background-color: #e9ecef; border-left: 4px solid var(--header-color); padding-left: 16px; }
+
+        .sidebar-group-label { padding: 15px 20px 5px 20px; font-size: 0.95em; font-style: italic; color: var(--hint-color); font-weight: 700; background-color: #fafafa; border-top: 1px solid #eee; border-bottom: 1px solid #eee; }
+        .sidebar-subtab { padding-left: 35px; background-color: #fdfdfd; font-size: 0.85em; }
+        .sidebar-subtab:hover, .sidebar-subtab.active { padding-left: 31px; }
+
+        .main-wrapper { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; background-color: transparent; margin: 0; z-index: 10; min-width: 300px; padding: 0; }
+        #main-scroll { flex-grow: 1; display: flex; flex-direction: column; overflow-y: scroll; overflow-x: auto; }
+        .main-content { padding: 30px; padding-bottom: 100px; flex-grow: 1; background-color: #fff; border-radius: 0; box-shadow: none; }
+
+        .tab-main-header { background-color: #e6f2ff; color: var(--header-color); padding: 15px 30px; font-size: 1.2em; font-weight: bold; border-bottom: 2px solid #b3d9ff; border-radius: 0; margin: 0; flex-shrink: 0; }
+
+        .main-wrapper.has-banner .tab-main-header { border-radius: 0 !important; }
+
+        .resizer { width: 10px; cursor: col-resize; background-color: transparent; flex-shrink: 0; z-index: 15; margin: 0; transition: background-color 0.2s; }
+        .resizer:hover, .resizer.active { background-color: #d1d8e0; }
+
+        .console-container { width: 400px; background-color: #fff; border-left: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; margin: 0; border-radius: 0; box-shadow: none; }
+        .console-header { padding: 15px; font-weight: bold; font-size: 1.1em; background-color: #f8f9fa; border-bottom: 1px solid var(--border-color); }
+
+        .console-output { flex-grow: 1; background-color: #000; color: #ddd; font-family: "Consolas", monospace; font-size: 0.85em; padding: 10px; overflow-y: auto; overflow-x: auto; white-space: pre; word-wrap: normal; }
+        .log-line { margin-bottom: 2px; }
+        .log-timestamp { color: #888; margin-right: 8px; }
+        .log-category { font-weight: bold; margin-right: 8px; }
+        .log-core { color: #5dade2; }   
+        .log-config { color: #f4d03f; } 
+        .log-ai { color: #af7ac5; }     
+        .log-ui { color: #48c9b0; }     
+        .log-system { color: #eee; }
+        .log-level-error { color: #e74c3c; font-weight: bold; }
+        .log-level-warning { color: #e67e22; }
+
+        .footer-controls { background-color: #f8f9fa; border-top: 1px solid var(--border-color); padding: 15px; display: flex; flex-direction: column; gap: 10px; border-radius: 0 0 5px 5px; }
+        .controls-row { display: flex; gap: 10px; }
+        .controls-row button { flex-grow: 1; padding: 10px; font-weight: bold; cursor: pointer; }
+
+        button:disabled, button:disabled:hover {
+            background-color: var(--disabled-bg) !important;
+            color: var(--disabled-text) !important;
+            border: 1px solid var(--disabled-border) !important;
+            opacity: 1;
+            cursor: not-allowed !important;
+            box-shadow: none !important;
+
+            filter: grayscale(1);
+        }
+        button:disabled span { color: var(--disabled-text) !important; }
+        .form-group { margin-bottom: 14px; }
+        .form-group:last-child { margin-bottom: 0; }
+        .form-group label { display: block; font-weight: 600; font-size: 0.95rem; margin-bottom: 6px; color: #1e293b; }
+
+        .input-row { display: flex; gap: 10px; align-items: center; width: 100%; max-width: 500px; }
+        .input-row input[type="text"], .input-row input[type="password"], .input-row select, .input-row input[type="number"] { flex-grow: 1; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; color: #0f172a; background-color: #f8fafc; transition: all 0.15s ease; box-sizing: border-box; }
+        .input-row input[type="text"]:focus, .input-row input[type="password"]:focus, .input-row select:focus, .input-row input[type="number"]:focus { outline: none; background-color: #ffffff; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+        .btn-default { padding: 12px 14px; height: auto; cursor: pointer; border: 1px solid var(--border-color); background: #f8f9fa; border-radius: 8px; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; color: var(--hint-color); flex-shrink: 0; font-weight: bold; width: auto; transition: all 0.15s ease; }
+        .btn-default:hover { background: #e2e6ea; color: var(--header-color); }
+
+        .hint { font-size: 0.8rem; color: #64748b; margin-top: 6px; display: block; line-height: 1.4; white-space: pre-wrap; }
+
+        .i18n-line { display: block; }
+        .i18n-line:empty::before { content: "\00a0"; }
+        .i18n-hang { display: flex; }
+        .i18n-marker { flex: 0 0 auto; white-space: pre; }
+        .i18n-text { flex: 1 1 auto; min-width: 0; }
+
+        .settings-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .error-text { color: var(--error-color); font-weight: bold; font-size: 0.9em; margin-top: 5px; display: block; min-height: 1.2em; }
+        .section-header { color: #1e293b; font-weight: bold; font-size: 1.1em; margin-top: 18px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); }
+
+        .dirty-field { background-color: #fffde7 !important; border-color: #fbc02d !important; box-shadow: 0 0 5px rgba(251, 192, 45, 0.3) !important; transition: all 0.2s; }
+        .error-field { border-color: var(--error-color) !important; background-color: #ffebee !important; }
+
+        .banner-tab-link { color: inherit; font-weight: bold; text-decoration: underline; cursor: pointer; }
+        .banner-tab-link:hover { color: #8e0000; }
+
+        @keyframes errorFlash {
+            0%, 100% { box-shadow: none; }
+            50% { box-shadow: 0 0 0 4px rgba(211, 47, 47, 0.45); }
+        }
+        .error-flash { animation: errorFlash 0.8s ease-in-out 2; }
+
+        #progress-bar.progress-failed { accent-color: var(--error-color); }
+        #progress-bar.progress-failed::-webkit-progress-value { background-color: var(--error-color); }
+        #progress-bar.progress-done { accent-color: #4CAF50; }
+        #progress-bar.progress-done::-webkit-progress-value { background-color: #4CAF50; }
+
+        #run-status { display: none; font-weight: bold; margin-top: 8px; align-items: center; gap: 5px; }
+        #run-status.status-done { color: #2e7d32; }
+        #run-status.status-failed { color: var(--error-color); }
+        #run-status.status-aborted { color: #e67e22; }
+
+        #save-toast, #error-toast {
+            position: fixed; 
+            top: 20px; 
+            left: 50%;
+            transform: translateX(-50%);
+            color: white; 
+            padding: 10px 20px; 
+            border-radius: 4px; 
+            opacity: 0; 
+            transition: opacity 0.3s; 
+            pointer-events: none; 
+            z-index: 9999; 
+            font-weight: bold;
+        }
+
+        #save-toast { background: #4CAF50; }
+        #error-toast { background: var(--error-color); }
+
+        #modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        #modal-dialog {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.25);
+            padding: 24px 28px;
+            max-width: 460px;
+            width: calc(100% - 60px);
+        }
+
+        #modal-dialog.with-path {
+            max-width: 760px;
+        }
+
+        #modal-path {
+            display: none;
+            margin-top: 10px;
+            background-color: #e9ecef;
+            padding: 6px 8px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.9em;
+            user-select: all;
+            word-break: break-all;
+            max-height: 30vh;
+            overflow-y: auto;
+        }
+        #modal-dialog.with-path #modal-path {
+            display: block;
+        }
+        #modal-path-copy {
+            display: none;
+            padding: 2px 8px;
+            font-size: 0.85em;
+            margin-top: 8px;
+        }
+        #modal-dialog.with-path #modal-path-copy {
+            display: inline-flex;
+        }
+        #modal-message {
+            color: #1e293b;
+            font-size: 0.98rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-bottom: 20px;
+        }
+        #modal-buttons { display: flex; justify-content: flex-end; gap: 10px; }
+        #modal-buttons button {
+            padding: 9px 22px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+        #modal-ok { background-color: #005599; color: white; border: none; }
+        #modal-ok:hover { background-color: #0068ba; }
+        #modal-cancel { background: transparent; color: #475569; border: 1px solid #cbd5e1; }
+        #modal-cancel:hover { background: #f1f5f9; }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 12px 20px;
+            border-top: 1px solid #eee;
+            cursor: pointer;
+            color: var(--hint-color);
+            font-size: 0.85em;
+        }
+        .sidebar-brand:hover { background-color: #e9ecef; }
+        .sidebar-brand-text { line-height: 1.35; }
+        .sidebar-brand-name { display: block; font-weight: bold; }
+        .sidebar-brand-version { display: block; font-size: 0.9em; }
+
+        #about-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        #about-dialog {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.25);
+            padding: 24px 28px;
+            max-width: 620px;
+            width: calc(100% - 60px);
+            color: #1e293b;
+        }
+        #about-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+        #about-head h3 { margin: 0; font-size: 1.25rem; }
+        #about-version { color: var(--hint-color); font-size: 0.9rem; }
+        .about-line { margin: 6px 0; font-size: 0.95rem; }
+        .about-link-row { margin: 12px 0; }
+        .about-link-row a { font-weight: bold; color: #005599; text-decoration: underline; cursor: pointer; }
+        .about-link-url { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+        .about-link-url code {
+            background-color: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.8em;
+            user-select: all;
+            word-break: break-all;
+        }
+        .about-copy { padding: 2px 8px; font-size: 0.85em; flex-shrink: 0; }
+        #about-buttons { display: flex; justify-content: flex-end; margin-top: 18px; }
+        #about-buttons button {
+            padding: 9px 22px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.95rem;
+            cursor: pointer;
+            background-color: #005599;
+            color: white;
+            border: none;
+        }
+        #about-buttons button:hover { background-color: #0068ba; }
+    </style>
+</head>
+<body>
+    <script>
+        window.ALL_TRANSLATIONS = {{ translations | tojson }};
+        window.SERVER_LANGUAGE = {{ current_settings.get('GUI_LANGUAGE', 'en') | tojson }};
+
+        window.rawOriginalState = {{ current_settings | tojson }};
+        window.FIELD_META = {{ field_meta | tojson }};
+        window.PROVIDER_FIELD_KINDS = {{ provider_field_kinds | tojson }};
+
+        window.API_TOKEN = null;
+        window.__apiTokenReady = new Promise(function (resolve) {
+            window.__receiveApiToken = function (token) {
+                window.API_TOKEN = token;
+                resolve(token);
+                return true;
+            };
+        });
+
+        const _originalFetch = window.fetch.bind(window);
+        window.fetch = async function(url, options) {
+            if (typeof url === 'string' && url.startsWith('/api/')) {
+                await window.__apiTokenReady;
+                options = options || {};
+                options.headers = Object.assign({}, options.headers, { 'X-App-Token': window.API_TOKEN });
+            }
+            return _originalFetch(url, options);
+        };
+
+        setTimeout(function () {
+            if (window.API_TOKEN === null) {
+                console.error("Seva's Media Processor: the API token never reached this window.");
+                if (window.showToast) {
+                    window.showToast(
+                        window.getT
+                            ? window.getT('msg_token_handoff_failed', "The application window did not finish starting. Please restart Seva's Media Processor.")
+                            : "The application window did not finish starting. Please restart Seva's Media Processor.",
+                        true
+                    );
+                }
+            }
+        }, 10000);
+
+        window.diskErrors = {{ initial_errors | tojson }};
+        window.activeTab = {{ active_tab | tojson }};
+    </script>
+
+    <div class="sidebar">
+        <div style="flex-grow: 1;">
+            <a href="javascript:void(0)" onclick="window.switchTab('general')" data-tab="general" class="sidebar-tab {% if active_tab == 'general' %}active{% endif %}">
+                <span id="warn-tab-general" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_general">General</span>
+            </a>
+
+            <div class="sidebar-group-label" data-i18n="lbl_group_media">Media Files</div>
+
+            <a href="javascript:void(0)" onclick="window.switchTab('images')" data-tab="images" class="sidebar-tab sidebar-subtab {% if active_tab == 'images' %}active{% endif %}">
+                <span id="warn-tab-images" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_images">Images</span>
+            </a>
+            <a href="javascript:void(0)" onclick="window.switchTab('docs')" data-tab="docs" class="sidebar-tab sidebar-subtab {% if active_tab == 'docs' %}active{% endif %}">
+                <span id="warn-tab-docs" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_docs">Documents (PDF)</span>
+            </a>
+            <a href="javascript:void(0)" onclick="window.switchTab('animations')" data-tab="animations" class="sidebar-tab sidebar-subtab {% if active_tab == 'animations' %}active{% endif %}">
+                <span id="warn-tab-animations" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_animations">Animations (GIF)</span>
+            </a>
+            <a href="javascript:void(0)" onclick="window.switchTab('videos')" data-tab="videos" class="sidebar-tab sidebar-subtab {% if active_tab == 'videos' %}active{% endif %}">
+                <span id="warn-tab-videos" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_videos">Videos</span>
+            </a>
+
+            <a href="javascript:void(0)" onclick="window.switchTab('output')" data-tab="output" class="sidebar-tab {% if active_tab == 'output' %}active{% endif %}" style="border-top: 1px solid #eee;">
+                <span id="warn-tab-output" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_output">Output Quality</span>
+            </a>
+            <a href="javascript:void(0)" onclick="window.switchTab('ai')" data-tab="ai" class="sidebar-tab {% if active_tab == 'ai' %}active{% endif %}">
+                <span id="warn-tab-ai" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_ai">Process images with AI</span>
+            </a>
+            <a href="javascript:void(0)" onclick="window.switchTab('exports')" data-tab="exports" class="sidebar-tab {% if active_tab == 'exports' %}active{% endif %}">
+                <span id="warn-tab-exports" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_exports">Exports</span>
+            </a>
+        </div>
+
+        <div class="sidebar-brand" id="sidebar-brand" role="button" tabindex="0"
+             onclick="window.showAboutDialog()"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.showAboutDialog(); }"
+             title="About" data-i18n-title="btn_about">
+            <img src="{{ url_for('static', filename='app_icon_64.png') }}" width="22" height="22" alt="">
+            <span class="sidebar-brand-text">
+                <span class="sidebar-brand-name">Seva's Media Processor</span>
+                <span class="sidebar-brand-version">v{{ app_version }}</span>
+            </span>
+        </div>
+    </div>
+
+    <div class="main-wrapper" id="main-wrapper">
+        <div id="global-error-banner" class="alert-banner global-alert">
+            <div class="banner-row">
+                <span>⚠️</span> <span id="global-error-text"></span>
+            </div>
+
+            <div class="banner-row" id="global-error-ai-hint" style="display: none;">
+                <span data-i18n="msg_ai_optional_hint">Don't need AI? Select "Turn media files to JPEGs".</span>
+                <button type="button" class="banner-jump-btn" onclick="window.goToField('general', 'ENABLE_LLM_INFERENCE')"><span data-i18n="btn_goto_mode">Go to setting</span></button>
+            </div>
+        </div>
+
+        <div class="tab-main-header" id="tab-main-header">
+            <span id="tab-header-text" data-i18n="hdr_{{ active_tab }}">General Application Settings</span>
+        </div>
+
+        <div id="main-scroll">
+        <div id="general-fatal-error" class="alert-banner global-alert" style="flex-direction: column; align-items: flex-start; gap: 15px;">
+            <div style="display: flex; gap: 8px;">
+                <span>⚠️</span> <span id="general-fatal-text"></span>
+            </div>
+            <div id="fatal-corrupted-instructions" style="display: none; flex-direction: column; width: 100%;">
+                <div data-i18n="msg_corrupted_title">Settings file is corrupted! You have two options:</div>
+                <br>
+                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_corrupted_opt1_title">Option 1: Reset everything to defaults</b>
+                <ol style="margin-top:5px; margin-bottom:15px;">
+                    <li>
+                        <span data-i18n="msg_corrupted_opt1_step1">This will deactivate your settings and rename the file to a corrupted backup.</span><br>
+                        <button class="btn-default" onclick="resetSettings()" style="margin-top:8px; margin-bottom:12px;"><span data-i18n="btn_reset_defaults">Reset to Defaults</span></button>
+                    </li>
+                </ol>
+                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_corrupted_opt2_title">Option 2: Fix it manually</b>
+                <ol style="margin-top:5px;">
+                    <li>
+                        <span data-i18n="msg_corrupted_opt2_step1">The settings can be located here in the settings.json:</span><br>
+                        <code id="corrupted-settings-path" style="display:inline-block; margin-top:5px; margin-bottom:8px; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;">{{ settings_path }}</code>
+                        <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle; margin-bottom:8px;" onclick='copyTextToClipboard(document.getElementById("corrupted-settings-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
+                        <button class="btn-default" onclick="openSettingsFile('active')" style="margin-top:0px; margin-bottom:12px;"><span data-i18n="btn_open_corrupted">Open settings.json</span></button>
+                    </li>
+                    <li data-i18n="msg_corrupted_opt2_step2">Find and fix the syntax error (e.g. missing quotes or commas) and click 'File > Save'.</li>
+                    <li data-i18n="msg_corrupted_opt2_step3">Restart the application.</li>
+                </ol>
+                <div id="raw-error-container" style="margin-top: 15px; padding: 10px; background-color: #fff; border: 1px solid #ffcdd2; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #c62828; overflow-x: auto; user-select: text;">
+                </div>
+            </div>
+
+            <div id="fatal-reset-instructions" style="display: none; flex-direction: column; width: 100%;">
+                <div data-i18n="msg_reset_success">Settings have been reset to default values! You now have two options:</div>
+                <br>
+                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_reset_opt1_title">Option 1: If you don't care about your old settings</b>
+                <ol style="margin-top:5px; margin-bottom:15px;">
+                    <li data-i18n="msg_reset_opt1_step1">Simply close the application.</li>
+                    <li data-i18n="msg_reset_opt1_step2">Restart the application.</li>
+                </ol>
+                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_reset_opt2_title">Option 2: If you want to recover your folder paths or other options</b>
+                <ol style="margin-top:5px;">
+                    <li>
+                        <span data-i18n="msg_reset_opt2_step1">Your old corrupted settings can be found in the backup file:</span><br>
+                        <code id="backup-path-display" style="display:inline-block; margin-top:5px; margin-bottom:8px; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;"></code>
+                        <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle; margin-bottom:8px;" onclick='copyTextToClipboard(document.getElementById("backup-path-display").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
+                        <button class="btn-default" onclick="openSettingsFile('backup')" style="margin-top:0px; margin-bottom:12px;"><span data-i18n="btn_open_backup">Open latest backup (.json)</span></button>
+                    </li>
+                    <li>
+                        <span data-i18n="msg_reset_opt2_step2">Open the new clean settings file:</span><br>
+                        <code id="reset-settings-path" style="display:inline-block; margin-top:5px; margin-bottom:8px; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;">{{ settings_path }}</code>
+                        <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle; margin-bottom:8px;" onclick='copyTextToClipboard(document.getElementById("reset-settings-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
+                        <button class="btn-default" onclick="openSettingsFile('active')" style="margin-top:0px; margin-bottom:12px;"><span data-i18n="btn_open_new_settings">Open new settings.json</span></button>
+                    </li>
+                    <li data-i18n="msg_reset_opt2_step3">Copy your old settings over and click 'File &gt; Save' in your text editor.</li>
+                    <li data-i18n="msg_reset_opt2_step4">Close and restart the application.</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="main-content" id="main-content">
+            {% block content %}{% endblock %}
+        </div>
+        </div> 
+    </div>
+
+    <div class="resizer" id="drag-resizer"></div>
+
+    <div class="console-container" id="console-container">
+        <div style="display: flex; justify-content: flex-end; padding: 10px; background-color: #f8f9fa; border-bottom: 1px solid var(--border-color);">
+        </div>
+        <div class="console-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span data-i18n="lbl_console">Live Processing Console</span>
+            <button type="button" id="btn-copy-console" onclick="copyConsoleToClipboard()"
+                    style="font-size: 0.75em; font-weight: normal; padding: 4px 10px; border-radius: 4px; cursor: pointer;"
+                    title="Copy the full console text to the clipboard">
+                📋 <span data-i18n="btn_copy_console">Copy</span>
+            </button>
+        </div>
+        <div class="console-output" id="console-output"></div>
+
+        <div class="footer-controls">
+            <div id="global-actions" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div id="unsaved-warning-label" style="font-weight: bold; color: #856404; display: none; align-items: center; gap: 5px;">
+                        ⚠️ <span data-i18n="lbl_unsaved">Unsaved Changes</span>
+                    </div>
+                    <div id="saved-status-label" style="font-weight: bold; color: #4CAF50; display: flex; align-items: center; gap: 5px;">
+                        ✔ <span data-i18n="lbl_saved">Configuration Up to Date</span>
+                    </div>
+                </div>
+                <div class="controls-row">
+                    <button id="btn-apply" onclick="window.commitGlobalDraft()" style="background-color: #3b82f6; color: white; border: none; border-radius: 4px; transition: opacity 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        ✔ <span data-i18n="btn_apply_changes">Apply Changes</span>
+                    </button>
+                    <button id="btn-discard" onclick="window.discardGlobalDraft()" style="background-color: transparent; color: #475569; border: 1px solid #cbd5e1; border-radius: 4px; transition: opacity 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        ✘ <span data-i18n="btn_discard">Discard</span>
+                    </button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 8px; font-weight: bold; color: var(--hint-color);">
+                <span data-i18n="lbl_progress_title">Processing Progress</span>
+            </div>
+            <progress id="progress-bar" value="0" max="100" style="width: 100%; height: 20px;"></progress>
+            <div id="run-status"></div>
+            <div class="controls-row" style="margin-top: 10px;">
+                <button id="btn-start" onclick="startProcessing()" style="background-color: #005599; color: white; border: none; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 8px;">▶️ <span data-i18n="btn_start">Start processing</span></button>
+                <button id="btn-stop" onclick="stopProcessing()" data-stopping="false" disabled style="border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 8px;"><span id="btn-stop-icon">🛑</span> <span id="btn-stop-text" data-i18n="btn_stop">Stop</span></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="save-toast">
+        ✓ <span data-i18n="toast_saved">Settings Saved</span>
+    </div>
+
+    <div id="error-toast">
+        ✘ <span data-i18n="toast_not_saved">Settings not saved due to errors.</span>
+    </div>
+
+    <div id="about-overlay">
+        <div id="about-dialog" role="dialog" aria-modal="true">
+            <div id="about-head">
+                <img src="{{ url_for('static', filename='app_icon_64.png') }}" width="48" height="48" alt="">
+                <div>
+                    <h3>Seva's Media Processor</h3>
+                    <div id="about-version">v{{ app_version }}</div>
+                </div>
+            </div>
+            <div class="about-line" data-i18n="lbl_about_built_by">Built by Vsevolod Belonogov</div>
+            <div class="about-line" data-i18n="lbl_about_license">Open source under the Apache License 2.0 - see LICENSE.txt</div>
+            <div class="about-link-row">
+                <a href="javascript:void(0)" onclick="window.openExternalLink('youtube')" data-i18n="lbl_about_youtube">YouTube channel</a>
+                <div class="about-link-url">
+                    <code id="about-url-youtube">{{ app_links['youtube'] }}</code>
+                    <button type="button" class="btn-default about-copy" id="about-copy-youtube"
+                            onclick='copyTextToClipboard(document.getElementById("about-url-youtube").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+                </div>
+            </div>
+            <div class="about-link-row">
+                <a href="javascript:void(0)" onclick="window.openExternalLink('github')" data-i18n="lbl_about_github">Source code on GitHub</a>
+                <div class="about-link-url">
+                    <code id="about-url-github">{{ app_links['github'] }}</code>
+                    <button type="button" class="btn-default about-copy" id="about-copy-github"
+                            onclick='copyTextToClipboard(document.getElementById("about-url-github").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+                </div>
+            </div>
+            <div id="about-buttons">
+                <button type="button" id="about-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-overlay">
+        <div id="modal-dialog" role="dialog" aria-modal="true">
+            <div id="modal-message"></div>
+            <code id="modal-path"></code>
+            <button type="button" class="btn-default" id="modal-path-copy"
+                    onclick='copyTextToClipboard(document.getElementById("modal-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+            <div id="modal-buttons">
+                <button type="button" id="modal-cancel">Cancel</button>
+                <button type="button" id="modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+
+</body>
+</html>

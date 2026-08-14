@@ -1,0 +1,117 @@
+
+<form id="videos-settings-form" onsubmit="event.preventDefault();" novalidate>
+    <div class="form-group" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <span style="font-weight: bold;" data-i18n="lbl_supported_img">Supported Extensions:</span>
+        <span style="color: var(--hint-color); margin-left: 10px;">.mp4, .mov, .avi, .mkv, .wmv, .webm</span>
+    </div>
+    <div class="form-group">
+        <label for="video_mode" data-i18n="lbl_vid_mode">Video Mode:</label>
+        <div class="input-row">
+            <select id="video_mode" name="VIDEO_MODE">
+                <option value="SUMMARY" {% if settings.VIDEO_MODE == 'SUMMARY' %}selected{% endif %} data-i18n="opt_summary">SUMMARY</option>
+                <option value="SAMPLING" {% if settings.VIDEO_MODE == 'SAMPLING' %}selected{% endif %} data-i18n="opt_sampling">SAMPLING</option>
+            </select>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_MODE", {{ default_settings.VIDEO_MODE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_vid_mode">• SUMMARY: Extracts a fixed number of frames across the whole video (e.g., exactly 10 frames).
+• SAMPLING: Extracts frames at a fixed time interval (e.g., 1 frame every 5 seconds).</span>
+        <div id="err-VIDEO_MODE" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label for="video_range" data-i18n="lbl_vid_range">Time Range:</label>
+        <div class="input-row">
+            <input type="text" id="video_range" name="VIDEO_RANGE" value="{{ settings.VIDEO_RANGE }}" data-i18n-placeholder="placeholder_all" placeholder="<ALL>">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_RANGE", {{ default_settings.VIDEO_RANGE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_vid_range">Format MUST be strict HH:MM:SS.
+Examples:
+• First 10 seconds: '00:00:00-00:00:10'
+• One minute to two minutes: '00:01:00-00:02:00'
+• Specific times: '00:00:15, 00:00:30, 00:00:45-00:01:00'
+• Leave empty to process the whole video.</span>
+        <div id="err-VIDEO_RANGE" class="error-text"></div>
+    </div>
+
+    <div id="sect-summary">
+        <div class="section-header" data-i18n="lbl_summary_sect">SUMMARY Mode Settings</div>
+
+        <div class="form-group">
+            <label for="video_summary_target_total_frames" data-i18n="lbl_vid_sum_frames">Summary Target Count:</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="video_summary_target_total_frames" name="VIDEO_SUMMARY_TARGET_TOTAL_FRAMES" value="{{ settings.VIDEO_SUMMARY_TARGET_TOTAL_FRAMES }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_SUMMARY_TARGET_TOTAL_FRAMES", {{ default_settings.VIDEO_SUMMARY_TARGET_TOTAL_FRAMES | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_vid_sum_frames">Total frames extracted uniformly across the video if Mode is SUMMARY. Must be &gt;= 1.</span>
+            <div id="err-VIDEO_SUMMARY_TARGET_TOTAL_FRAMES" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="video_summary_scene_sensitivity" data-i18n="lbl_scene_sens">Scene Sensitivity (MSE):</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="decimal" id="video_summary_scene_sensitivity" name="VIDEO_SUMMARY_SCENE_SENSITIVITY" value="{{ settings.VIDEO_SUMMARY_SCENE_SENSITIVITY }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_SUMMARY_SCENE_SENSITIVITY", {{ default_settings.VIDEO_SUMMARY_SCENE_SENSITIVITY | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_scene_sens">Compares pixels to skip consecutive frames that look visually identical. Bounds: Must be &gt;= 0.0.</span>
+            <div id="err-VIDEO_SUMMARY_SCENE_SENSITIVITY" class="error-text"></div>
+        </div>
+    </div>
+
+    <div id="sect-sampling">
+        <div class="section-header" data-i18n="lbl_samp_sect">SAMPLING Mode Settings</div>
+
+        <div class="form-group">
+            <label for="video_sampling_capture_rate_fps" data-i18n="lbl_vid_samp_fps">Frames Per Second:</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="decimal" id="video_sampling_capture_rate_fps" name="VIDEO_SAMPLING_CAPTURE_RATE_FPS" value="{{ settings.VIDEO_SAMPLING_CAPTURE_RATE_FPS }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_SAMPLING_CAPTURE_RATE_FPS", {{ default_settings.VIDEO_SAMPLING_CAPTURE_RATE_FPS | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_vid_samp_fps">How many pictures to capture every second if Mode is SAMPLING. Must be &gt; 0.0.</span>
+            <div id="err-VIDEO_SAMPLING_CAPTURE_RATE_FPS" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="video_sampling_max_frames_budget" data-i18n="lbl_vid_samp_max">Maximum Frame Limit:</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="video_sampling_max_frames_budget" name="VIDEO_SAMPLING_MAX_FRAMES_BUDGET" value="{{ settings.VIDEO_SAMPLING_MAX_FRAMES_BUDGET }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_SAMPLING_MAX_FRAMES_BUDGET", {{ default_settings.VIDEO_SAMPLING_MAX_FRAMES_BUDGET | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_vid_samp_max">Absolute maximum number of images for a single video in SAMPLING mode. Must be &gt;= 1.</span>
+            <div id="err-VIDEO_SAMPLING_MAX_FRAMES_BUDGET" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="video_sampling_scene_sensitivity" data-i18n="lbl_scene_sens">Scene Sensitivity (MSE):</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="decimal" id="video_sampling_scene_sensitivity" name="VIDEO_SAMPLING_SCENE_SENSITIVITY" value="{{ settings.VIDEO_SAMPLING_SCENE_SENSITIVITY }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("VIDEO_SAMPLING_SCENE_SENSITIVITY", {{ default_settings.VIDEO_SAMPLING_SCENE_SENSITIVITY | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_scene_sens">Compares pixels to skip consecutive frames that look visually identical. Bounds: Must be &gt;= 0.0.</span>
+            <div id="err-VIDEO_SAMPLING_SCENE_SENSITIVITY" class="error-text"></div>
+        </div>
+    </div>
+</form>
+
+<script>
+    (function() {
+        const modeSelect = document.getElementById('video_mode');
+        const summarySect = document.getElementById('sect-summary');
+        const samplingSect = document.getElementById('sect-sampling');
+
+        function toggleSections() {
+            if(!modeSelect) return;
+            if (modeSelect.value === 'SUMMARY') {
+                if(summarySect) summarySect.style.display = 'block';
+                if(samplingSect) samplingSect.style.display = 'none';
+            } else {
+                if(summarySect) summarySect.style.display = 'none';
+                if(samplingSect) samplingSect.style.display = 'block';
+            }
+        }
+
+        if(modeSelect) {
+            modeSelect.addEventListener('change', toggleSections);
+            toggleSections(); 
+        }
+    })();
+</script>

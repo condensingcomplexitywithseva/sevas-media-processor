@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div id="tab-content-general" class="tab-pane">
+    {% include "tabs/general_content.html" %}
+</div>
+<div id="tab-content-images" class="tab-pane" style="display: none;">
+    {% include "tabs/images_content.html" %}
+</div>
+<div id="tab-content-output" class="tab-pane" style="display: none;">
+    {% include "tabs/output_content.html" %}
+</div>
+<div id="tab-content-docs" class="tab-pane" style="display: none;">
+    {% include "tabs/docs_content.html" %}
+</div>
+<div id="tab-content-animations" class="tab-pane" style="display: none;">
+    {% include "tabs/animations_content.html" %}
+</div>
+<div id="tab-content-videos" class="tab-pane" style="display: none;">
+    {% include "tabs/videos_content.html" %}
+</div>
+<div id="tab-content-ai" class="tab-pane" style="display: none;">
+    {% include "tabs/ai_content.html" %}
+</div>
+<div id="tab-content-exports" class="tab-pane" style="display: none;">
+    {% include "tabs/exports_content.html" %}
+</div>
+{% endblock %}

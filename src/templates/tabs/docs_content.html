@@ -1,0 +1,48 @@
+
+<form id="docs-settings-form" onsubmit="event.preventDefault();" novalidate>
+    <div class="form-group" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <span style="font-weight: bold;" data-i18n="lbl_supported_img">Supported Extensions:</span>
+        <span style="color: var(--hint-color); margin-left: 10px;">.pdf</span>
+    </div>
+    <div class="form-group">
+        <label for="document_range" data-i18n="lbl_doc_range">Target Pages:</label>
+        <div class="input-row">
+            <input type="text" id="document_range" name="DOCUMENT_RANGE" value="{{ settings.DOCUMENT_RANGE }}" data-i18n-placeholder="placeholder_all" placeholder="<ALL>">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("DOCUMENT_RANGE", {{ default_settings.DOCUMENT_RANGE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_doc_range">Define exactly which PDF pages to extract. Examples:
+• Pages 2 to 8: '2-8'
+• First 10 pages: '-10'
+• Page 10 onwards to the end of the file: '10-'
+• Leave empty to extract ALL pages.</span>
+        <div id="err-DOCUMENT_RANGE" class="error-text"></div>
+    </div>
+
+    <div class="section-header" data-i18n="lbl_adv_general">Advanced Settings (Do not change unless certain)</div>
+
+    <div class="form-group">
+        <label for="document_max_pages" data-i18n="lbl_doc_max">Maximum number of pages per file:</label>
+        <div class="input-row" style="max-width: 250px;">
+            <input type="text" inputmode="numeric" id="document_max_pages" name="DOCUMENT_MAX_PAGES" value="{{ settings.DOCUMENT_MAX_PAGES }}">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("DOCUMENT_MAX_PAGES", {{ default_settings.DOCUMENT_MAX_PAGES | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_doc_max">No more than this many pages are extracted from a single document; extra pages are skipped and the report notes it. Also protects your computer from huge PDF books.
+Must be &gt;= 1.</span>
+        <div id="err-DOCUMENT_MAX_PAGES" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label for="pdf_scale" data-i18n="lbl_pdf_scale">Text Sharpness:</label>
+        <div class="input-row" style="max-width: 250px;">
+            <input type="text" inputmode="numeric" id="pdf_scale" name="PDF_SCALE" value="{{ settings.PDF_SCALE }}">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("PDF_SCALE", {{ default_settings.PDF_SCALE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_pdf_scale">Controls the rendering resolution of PDF text.
+To improve the quality of PDF images, increase this setting in unison with Max Resolution in the Output Quality tab. Reference values:
+• High: Text Sharpness 4 + Max Resolution 3840
+• Standard: Text Sharpness 2 + Max Resolution 2560
+• Low: Text Sharpness 1 + Max Resolution 1920
+Must be &gt;= 1.</span>
+        <div id="err-PDF_SCALE" class="error-text"></div>
+    </div>
+</form>

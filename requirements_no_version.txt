@@ -1,0 +1,15 @@
+av
+numpy
+openpyxl
+pillow
+pillow-avif-plugin
+pillow_heif
+pydantic
+pypdfium2
+requests
+sqlmodel
+Flask
+pywebview
+SQLAlchemy
+Werkzeug
+pythonnet; sys_platform == "win32"

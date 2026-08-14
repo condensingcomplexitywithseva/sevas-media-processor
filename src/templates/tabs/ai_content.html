@@ -1,0 +1,513 @@
+
+<form id="ai-settings-form" onsubmit="event.preventDefault();" novalidate>
+    <div id="ai-disabled-warning" class="alert-banner warning" style="{% if settings.ENABLE_LLM_INFERENCE %}display: none;{% else %}display: flex;{% endif %} margin: 0 0 20px 0;">
+        <span data-i18n="warn_ai_disabled_lbl">AI Processing is disabled. Enable in General Tab.</span>
+    </div>
+
+    <div id="ai-settings-wrapper" style="transition: opacity 0.3s; {% if not settings.ENABLE_LLM_INFERENCE %}opacity: 0.6; pointer-events: none; filter: grayscale(100%);{% endif %}">
+
+        <div class="form-group">
+            <label data-i18n="lbl_llm_max_jpegs">Images per prompt:</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="MAX_JPEGS_PER_INFERENCE" name="MAX_JPEGS_PER_INFERENCE" value="{{ settings.MAX_JPEGS_PER_INFERENCE }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("MAX_JPEGS_PER_INFERENCE", {{ default_settings.MAX_JPEGS_PER_INFERENCE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_max_jpegs">How many images are sent to the AI per HTTP request.</span>
+            <div id="err-MAX_JPEGS_PER_INFERENCE" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label data-i18n="lbl_user_prompt">User Prompt / Question:</label>
+            <div class="input-row" style="max-width: 300px; margin-bottom: 10px;">
+                <select id="user_prompt_mode" name="LLM_USER_PROMPT_MODE" onchange="window.togglePromptModes('user', true)">
+                    <option value="TEXT" {% if settings.LLM_USER_PROMPT_MODE == 'TEXT' %}selected{% endif %} data-i18n="opt_text">TEXT</option>
+                    <option value="FILE" {% if settings.LLM_USER_PROMPT_MODE == 'FILE' %}selected{% endif %} data-i18n="opt_file">FILE</option>
+                </select>
+                <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_USER_PROMPT_MODE", {{ default_settings.LLM_USER_PROMPT_MODE | tojson }}); window.togglePromptModes("user", true); resetDefaultByName("LLM_USER_PROMPT", {{ default_settings.LLM_USER_PROMPT | tojson }}); document.getElementById("user_prompt_mode").dispatchEvent(new Event("change"));' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+
+            <div id="user_text_container" class="input-row" style="max-width: none; align-items: flex-start; {% if settings.LLM_USER_PROMPT_MODE == 'FILE' %}display: none;{% endif %}">
+                <textarea id="user_text_input" name="LLM_USER_PROMPT" style="flex-grow: 1; height: 80px; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-family: inherit; margin: 0;" {% if settings.LLM_USER_PROMPT_MODE == 'FILE' %}disabled{% endif %}>{{ settings.LLM_USER_PROMPT if settings.LLM_USER_PROMPT_MODE == 'TEXT' else '' }}</textarea>
+                <button type="button" class="btn-default" style="margin-top: 5px;" onclick='resetDefaultByName("LLM_USER_PROMPT", {{ default_settings.LLM_USER_PROMPT | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+
+            <div id="user_file_container" style="{% if settings.LLM_USER_PROMPT_MODE == 'TEXT' %}display: none;{% endif %}">
+                <div class="input-row" style="margin-bottom: 10px; max-width: none;">
+                    <input type="text" id="user_file_input" name="LLM_USER_PROMPT" value="{{ settings.LLM_USER_PROMPT if settings.LLM_USER_PROMPT_MODE == 'FILE' else '' }}" {% if settings.LLM_USER_PROMPT_MODE == 'TEXT' %}disabled{% endif %}>
+                    <button type="button" onclick="browseOS('file', 'user_file_input', window.loadPreview)" style="padding: 4px 10px; white-space: nowrap; cursor: pointer; border: 1px solid var(--border-color); background: white; border-radius: 4px;">📄 <span data-i18n="btn_browse_txt">Browse .txt</span></button>
+
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_USER_PROMPT_MODE", {{ default_settings.LLM_USER_PROMPT_MODE | tojson }}); window.togglePromptModes("user", true); resetDefaultByName("LLM_USER_PROMPT", {{ default_settings.LLM_USER_PROMPT | tojson }}); document.getElementById("user_prompt_mode").dispatchEvent(new Event("change"));' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_prompt_file_format" style="margin-bottom: 6px;">Expected: a plain text file (.txt) saved as UTF-8. In Notepad: File &rarr; Save As &rarr; Encoding: UTF-8.</span>
+                <pre id="user_file_preview" style="background: #F8F9FA; color: #005599; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85em; overflow-y: auto; max-height: 100px; margin: 0;" data-i18n="msg_no_file">No file selected.</pre>
+            </div>
+            <div id="err-LLM_USER_PROMPT" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label data-i18n="lbl_sys_prompt">System Prompt:</label>
+            <div class="input-row" style="max-width: 300px; margin-bottom: 10px;">
+                <select id="sys_prompt_mode" name="LLM_SYSTEM_PROMPT_MODE" onchange="window.togglePromptModes('sys', true)">
+                    <option value="TEXT" {% if settings.LLM_SYSTEM_PROMPT_MODE == 'TEXT' %}selected{% endif %} data-i18n="opt_text">TEXT</option>
+                    <option value="FILE" {% if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' %}selected{% endif %} data-i18n="opt_file">FILE</option>
+                </select>
+                <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_SYSTEM_PROMPT_MODE", {{ default_settings.LLM_SYSTEM_PROMPT_MODE | tojson }}); window.togglePromptModes("sys", true); resetDefaultByName("LLM_SYSTEM_PROMPT", {{ default_settings.LLM_SYSTEM_PROMPT | tojson }}); document.getElementById("sys_prompt_mode").dispatchEvent(new Event("change"));' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+
+            <div id="sys_text_container" class="input-row" style="max-width: none; align-items: flex-start; {% if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' %}display: none;{% endif %}">
+                <textarea id="sys_text_input" name="LLM_SYSTEM_PROMPT" style="flex-grow: 1; height: 80px; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-family: inherit; margin: 0;" {% if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' %}disabled{% endif %}>{{ settings.LLM_SYSTEM_PROMPT if settings.LLM_SYSTEM_PROMPT_MODE == 'TEXT' else '' }}</textarea>
+                <button type="button" class="btn-default" style="margin-top: 5px;" onclick='resetDefaultByName("LLM_SYSTEM_PROMPT", {{ default_settings.LLM_SYSTEM_PROMPT | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+
+            <div id="sys_file_container" style="{% if settings.LLM_SYSTEM_PROMPT_MODE == 'TEXT' %}display: none;{% endif %}">
+                <div class="input-row" style="margin-bottom: 10px; max-width: none;">
+                    <input type="text" id="sys_file_input" name="LLM_SYSTEM_PROMPT" value="{{ settings.LLM_SYSTEM_PROMPT if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' else '' }}" {% if settings.LLM_SYSTEM_PROMPT_MODE == 'TEXT' %}disabled{% endif %}>
+                    <button type="button" onclick="browseOS('file', 'sys_file_input', window.loadPreview)" style="padding: 4px 10px; white-space: nowrap; cursor: pointer; border: 1px solid var(--border-color); background: white; border-radius: 4px;">📄 <span data-i18n="btn_browse_txt">Browse .txt</span></button>
+
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_SYSTEM_PROMPT_MODE", {{ default_settings.LLM_SYSTEM_PROMPT_MODE | tojson }}); window.togglePromptModes("sys", true); resetDefaultByName("LLM_SYSTEM_PROMPT", {{ default_settings.LLM_SYSTEM_PROMPT | tojson }}); document.getElementById("sys_prompt_mode").dispatchEvent(new Event("change"));' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_prompt_file_format" style="margin-bottom: 6px;">Expected: a plain text file (.txt) saved as UTF-8. In Notepad: File &rarr; Save As &rarr; Encoding: UTF-8.</span>
+                <pre id="sys_file_preview" style="background: #F8F9FA; color: #005599; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85em; overflow-y: auto; max-height: 100px; margin: 0;" data-i18n="msg_no_file">No file selected.</pre>
+            </div>
+            <div id="err-LLM_SYSTEM_PROMPT" class="error-text"></div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 10px;">
+            <label data-i18n="lbl_llm_provider">AI Provider:</label>
+            <div class="input-row">
+                <select id="LLM_PROVIDER" name="LLM_PROVIDER">
+                    {% for provider in ['openai', 'claude', 'gemini', 'deepseek', 'mistral', 'ollama', 'lm-studio', 'custom'] %}
+                        <option value="{{ provider }}" {% if settings.LLM_PROVIDER == provider %}selected{% endif %}>{{ provider }}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDER", {{ default_settings.LLM_PROVIDER | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_provider">Select the API dialect and ecosystem you wish to use.</span>
+            <div id="err-LLM_PROVIDER" class="error-text"></div>
+        </div>
+
+        {% for provider_key, provider_config in settings.LLM_PROVIDERS.items() %}
+        <div class="provider-frame settings-card {% if settings.LLM_PROVIDER != provider_key %}hidden-frame{% endif %}" 
+             id="provider-{{ provider_key }}">
+
+            <div class="section-header" style="margin-top: 0;" data-i18n="lbl_prov_conn_settings">Provider Connection Settings</div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_prov_url">AI URL:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="prov_url_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.url" value="{{ provider_config.url }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.url", {{ default_settings.LLM_PROVIDERS[provider_key].url | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_prov_url" data-i18n-args='{"provider": "{{ provider_key }}"}'>The official API endpoint address for {{ provider_key }}. For local providers (like LM Studio or Ollama), this is usually a localhost address (e.g., http://localhost:1234/v1/chat/completions).</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.url" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_prov_model">AI Model Name:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="prov_model_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.model" value="{{ provider_config.model }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.model", {{ default_settings.LLM_PROVIDERS[provider_key].model | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_prov_model" data-i18n-args='{"provider": "{{ provider_key }}"}'>The exact identifier for the {{ provider_key }} model you wish to use (e.g., 'gpt-4o' or 'claude-3-7-sonnet-latest'). Ensure this matches the provider's official model list perfectly to avoid routing errors.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.model" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_prov_token">API Token:</label>
+                <div class="input-row" style="max-width: none;">
+                    {% set token_key = provider_key.upper().replace('-', '_') ~ '_TOKEN' %}
+                    <input type="password" id="prov_token_{{ provider_key }}" name="ENV_TOKENS.{{ provider_key }}" 
+                           placeholder="{% if provider_key in env_tokens %}********{% else %}Enter token here...{% endif %}"
+                           {% if provider_key not in env_tokens %}data-i18n-placeholder="placeholder_token"{% endif %}>
+                    <button type="button" class="btn-default" onclick='window.wipeToken("{{ provider_key }}")' title="Wipe Token" data-i18n-title="hint_wipe">🗑️ <span data-i18n="btn_wipe">Wipe</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_prov_token" data-i18n-args='{"env_path": "{{ env_path | replace("\\", "\\\\") }}"}'>Token is securely saved to local file: {{ env_path }}</span>
+                <div id="err-ENV_TOKENS.{{ provider_key }}" class="error-text"></div>
+            </div>
+
+            <div class="section-header" style="font-size: 1em;" data-i18n="lbl_adv_prov">Advanced Provider Configuration</div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_auth_key">Auth Header Key:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="prov_auth_key_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.auth_header_key" value="{{ provider_config.auth_header_key }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.auth_header_key", {{ default_settings.LLM_PROVIDERS[provider_key].auth_header_key | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_auth_key">Defines the HTTP header name used to authenticate with the AI provider. Standard APIs typically use 'Authorization' (OpenAI) or 'x-api-key' (Anthropic). Check your provider's API documentation if you are unsure.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.auth_header_key" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_auth_fmt">Auth Format:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="prov_auth_fmt_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.auth_header_format" value="{{ provider_config.auth_header_format }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.auth_header_format", {{ default_settings.LLM_PROVIDERS[provider_key].auth_header_format | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_auth_fmt">Specifies the exact format of the authentication string. The application will automatically swap '{token}' with your actual API key. For example, OpenAI requires 'Bearer {token}', while Anthropic just needs '{token}' by itself.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.auth_header_format" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_extra_key">Extra Header Key:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="prov_ext_key_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.extra_header_key" value="{{ provider_config.extra_header_key }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.extra_header_key", {{ default_settings.LLM_PROVIDERS[provider_key].extra_header_key | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_extra_key">An optional secondary HTTP header required by certain API ecosystems. For instance, Anthropic Claude strictly requires an 'anthropic-version' header to process requests. Leave this blank if your provider does not require one.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.extra_header_key" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_extra_val">Extra Header Value:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="prov_ext_val_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.extra_header_value" value="{{ provider_config.extra_header_value }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.extra_header_value", {{ default_settings.LLM_PROVIDERS[provider_key].extra_header_value | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_extra_val">The exact value to pass alongside the Extra Header Key above. For example, if using Anthropic, this is usually set to a date like '2023-06-01'. Leave blank if unused.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.extra_header_value" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <div class="input-row" style="width: auto;">
+                    <input type="hidden" name="LLM_PROVIDERS.{{ provider_key }}.require_max_tokens" value="false">
+                    <input type="checkbox" id="req_max_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.require_max_tokens" value="true" {% if provider_config.require_max_tokens %}checked{% endif %} style="width: auto; max-width: none; margin: 0;">
+                    <label for="req_max_{{ provider_key }}" style="margin: 0; padding-right: 10px;" data-i18n="lbl_req_max">Require Max Tokens:</label>
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.require_max_tokens", {{ default_settings.LLM_PROVIDERS[provider_key].require_max_tokens | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_req_max" style="margin-top: 10px;">Check this box to explicitly inject the 'max_tokens' parameter into the API payload. While OpenAI makes this optional, strict providers like Anthropic Claude will outright reject your request if this limit is missing.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.require_max_tokens" class="error-text" style="margin-top: -15px; margin-bottom: 15px;"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_max_val">Max Tokens Value:</label>
+                <div class="input-row" style="max-width: 250px;">
+                    <input type="text" inputmode="numeric" id="max_tok_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.max_tokens" value="{{ provider_config.max_tokens }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.max_tokens", {{ default_settings.LLM_PROVIDERS[provider_key].max_tokens | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_max_val">ONLY ACTIVE IF THE REQUIRE MAX TOKENS SETTING IS ENABLED
+Sets a hard limit on the maximum number of tokens (words/pieces of words) the AI is allowed to generate in its response. Increase this number if the AI's answers are being abruptly cut off mid-sentence.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.max_tokens" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_sys_loc">System Prompt Loc:</label>
+                <div class="input-row" style="max-width: 300px;">
+                    <select id="sys_loc_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.system_prompt_location">
+                        <option value="messages" {% if provider_config.system_prompt_location == 'messages' %}selected{% endif %}>messages</option>
+                        <option value="top_level" {% if provider_config.system_prompt_location == 'top_level' %}selected{% endif %}>top_level</option>
+                    </select>
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.system_prompt_location", {{ default_settings.LLM_PROVIDERS[provider_key].system_prompt_location | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_sys_loc">OpenAI expects the system prompt as the first entry in the 'messages' array.
+Anthropic Claude requires it explicitly separated at the 'top_level' of the payload.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.system_prompt_location" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_img_payload">Image Payload Style:</label>
+                <div class="input-row" style="max-width: 300px;">
+                    <select id="img_pay_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.image_payload_style">
+                        <option value="data_uri" {% if provider_config.image_payload_style == 'data_uri' %}selected{% endif %}>data_uri</option>
+                        <option value="base64_dict" {% if provider_config.image_payload_style == 'base64_dict' %}selected{% endif %}>base64_dict</option>
+                    </select>
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.image_payload_style", {{ default_settings.LLM_PROVIDERS[provider_key].image_payload_style | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_img_payload">'data_uri': Standard web formatting (data:image/jpeg;base64,...).
+'base64_dict': Raw data inside a nested source dictionary (used by Claude).</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.image_payload_style" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_extract_path">Response Extract Path:</label>
+                <div class="input-row" style="max-width: none;">
+                    <input type="text" id="resp_path_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.response_extraction_path" value="{{ provider_config.response_extraction_path }}">
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.response_extraction_path", {{ default_settings.LLM_PROVIDERS[provider_key].response_extraction_path | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_extract_path">The exact JSON bracket path to locate the AI's text response.
+• OpenAI/Custom: 'choices[0].message.content'
+• Anthropic Claude: 'content[0].text'</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.response_extraction_path" class="error-text"></div>
+            </div>
+
+            <div class="form-group">
+                <label data-i18n="lbl_reasoning">Reasoning Handling:</label>
+                <div class="input-row" style="max-width: 300px;">
+                    <select id="reason_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.reasoning_handling">
+                        <option value="preserve" {% if provider_config.reasoning_handling == 'preserve' %}selected{% endif %}>preserve</option>
+                        <option value="strip_xml" {% if provider_config.reasoning_handling == 'strip_xml' %}selected{% endif %}>strip_xml</option>
+                        <option value="parse_claude_blocks" {% if provider_config.reasoning_handling == 'parse_claude_blocks' %}selected{% endif %}>parse_claude_blocks</option>
+                        <option value="ignore_api_field" {% if provider_config.reasoning_handling == 'ignore_api_field' %}selected{% endif %}>ignore_api_field</option>
+                    </select>
+                    <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.reasoning_handling", {{ default_settings.LLM_PROVIDERS[provider_key].reasoning_handling | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+                </div>
+                <span class="hint" data-i18n="hint_reasoning">Determines how AI reasoning is handled:
+• preserve: Keeps all text intact.
+• strip_xml: Removes &lt;think&gt; tags (Ollama/Local).
+• parse_claude_blocks: Filters Anthropic 'thinking' arrays.
+• ignore_api_field: Ignores DeepSeek's dedicated reasoning fields.</span>
+                <div id="err-LLM_PROVIDERS.{{ provider_key }}.reasoning_handling" class="error-text"></div>
+            </div>
+        </div>
+        {% endfor %}
+
+        <div class="section-header" data-i18n="lbl_adv_llm">General Network & Error Settings</div>
+
+        <div class="form-group">
+            <div class="input-row" style="width: auto;">
+                <input type="hidden" name="HALT_ON_LLM_PARSE_ERROR" value="false">
+                <input type="checkbox" id="HALT_ON_LLM_PARSE_ERROR" name="HALT_ON_LLM_PARSE_ERROR" value="true" {% if settings.HALT_ON_LLM_PARSE_ERROR %}checked{% endif %} style="width: auto; margin: 0;">
+                <label for="HALT_ON_LLM_PARSE_ERROR" style="margin: 0; padding-right: 15px;" data-i18n="lbl_llm_parse_err">Stop on AI Parse Error:</label>
+                <button type="button" class="btn-default" onclick='resetDefaultByName("HALT_ON_LLM_PARSE_ERROR", {{ default_settings.HALT_ON_LLM_PARSE_ERROR | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_parse_err" style="margin-top: 10px;">If the AI server returns garbled text or an unrecognized JSON schema, halt the entire batch. If unchecked, the app logs the error and moves to the next file.</span>
+            <div id="err-HALT_ON_LLM_PARSE_ERROR" class="error-text" style="margin-top: 5px; margin-bottom: 15px;"></div>
+        </div>
+
+        <div class="form-group">
+            <label data-i18n="lbl_llm_max_fails">Max Consecutive AI Failures:</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="MAX_CONSECUTIVE_LLM_FAILURES" name="MAX_CONSECUTIVE_LLM_FAILURES" value="{{ settings.MAX_CONSECUTIVE_LLM_FAILURES }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("MAX_CONSECUTIVE_LLM_FAILURES", {{ default_settings.MAX_CONSECUTIVE_LLM_FAILURES | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_max_fails">If the AI server fails this many times in a row (e.g., server goes offline), the application pauses to prevent endless error loops. Must be &gt;= 1.</span>
+            <div id="err-MAX_CONSECUTIVE_LLM_FAILURES" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label data-i18n="lbl_llm_retries">Network Retries:</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="LLM_MAX_RETRIES" name="LLM_MAX_RETRIES" value="{{ settings.LLM_MAX_RETRIES }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_MAX_RETRIES", {{ default_settings.LLM_MAX_RETRIES | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_retries">Number of times to retry a failed HTTP request per chunk. Must be &gt;= 1.</span>
+            <div id="err-LLM_MAX_RETRIES" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label data-i18n="lbl_llm_timeout">Timeout (Sec):</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="LLM_TIMEOUT_SECONDS" name="LLM_TIMEOUT_SECONDS" value="{{ settings.LLM_TIMEOUT_SECONDS }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_TIMEOUT_SECONDS", {{ default_settings.LLM_TIMEOUT_SECONDS | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_timeout">Max wait time in seconds for the AI network response. Must be &gt;= 1.</span>
+            <div id="err-LLM_TIMEOUT_SECONDS" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label data-i18n="lbl_llm_sleep">Retry Delay (Sec):</label>
+            <div class="input-row" style="max-width: 250px;">
+                <input type="text" inputmode="numeric" id="LLM_RETRY_SLEEP_SECONDS" name="LLM_RETRY_SLEEP_SECONDS" value="{{ settings.LLM_RETRY_SLEEP_SECONDS }}">
+                <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_RETRY_SLEEP_SECONDS", {{ default_settings.LLM_RETRY_SLEEP_SECONDS | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+            </div>
+            <span class="hint" data-i18n="hint_llm_sleep">Pause duration in seconds between consecutive network retries. Must be &gt;= 0.</span>
+            <div id="err-LLM_RETRY_SLEEP_SECONDS" class="error-text"></div>
+        </div>
+    </div>
+
+    <script>
+        window.wipeToken = async function(provider) {
+            const confirmMsg = window.getT('msg_confirm_wipe', 'Are you sure you want to permanently wipe the token for {provider}? This cannot be undone.')
+                                   .replace('{provider}', provider);
+
+            if (!await window.appConfirm(confirmMsg)) return;
+
+            fetch('/api/settings/wipe_token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success') {
+                    window.showToast(data.message || 'Wipe failed', true);
+                    return;
+                }
+                if (window.ui_logger) window.ui_logger.log(`Token for ${provider} wiped from disk.`, "UI", "INFO");
+
+                const inputEl = document.getElementById(`prov_token_${provider}`);
+                if (inputEl) {
+                    inputEl.value = "";
+                    if (window.getT) inputEl.placeholder = window.getT("placeholder_token", "Enter token here...");
+                    inputEl.dataset.i18nPlaceholder = "placeholder_token";
+                    inputEl.classList.remove('dirty-field');
+                }
+
+                const fullKey = `ENV_TOKENS.${provider}`;
+                if (window.rawOriginalState) window.rawOriginalState.ENV_TOKENS = data.env_tokens || {};
+                delete window.originalState[fullKey];
+                delete window.draftState[fullKey];
+
+                window.diskErrors = data.errors || {};
+                if (window.applyErrors && window.hasUnsavedEdits()) {
+                    window.applyErrors = Object.assign({}, window.applyErrors, window.diskErrors);
+                } else {
+                    window.applyErrors = null;
+                }
+                window.renderErrors();
+                window.updateGlobalControls();
+                window.showToast(window.getT('msg_token_wiped', 'Token wiped from disk.'));
+            })
+            .catch(err => {
+                if (window.ui_logger) window.ui_logger.log(`Token wipe failed: ${err}`, "UI", "ERROR");
+                window.showToast(String(err), true);
+            });
+        };
+
+        window.loadPreview = function(inputId) {
+            const inputEl = document.getElementById(inputId);
+            const previewEl = document.getElementById(inputId.replace('_input', '_preview'));
+
+            if (!inputEl) return;
+            if (!inputEl.value) {
+                if (previewEl && window.getT) {
+                    previewEl.setAttribute('data-i18n', 'msg_no_file');
+                    previewEl.innerText = window.getT('msg_no_file', 'No file selected.');
+                }
+                return;
+            }
+
+            fetch('/api/preview/file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filepath: inputEl.value })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!previewEl || !window.getT) return;
+                let prefix = "";
+                if (data.preview_type === "top10") prefix = "--- " + window.getT('msg_top_10_preview', 'Top 10 rows preview') + " ---\n";
+                else if (data.preview_type === "full") prefix = "--- " + window.getT('msg_file_preview', 'File preview') + " ---\n";
+                else prefix = window.getT('msg_file_error', 'Could not read file:') + " ";
+
+                previewEl.removeAttribute('data-i18n');
+                let body = data.content;
+                if (data.preview_type === "error") {
+                    const PREVIEW_ERROR_DEFAULTS = {
+                        "preview_no_file": "Path invalid or missing.",
+                        "preview_not_txt": "Preview is available for .txt files only.",
+                        "preview_read_failed": "The file could not be read as text."
+                    };
+                    body = window.getT(data.content, PREVIEW_ERROR_DEFAULTS[data.content] || data.content);
+                }
+                previewEl.innerText = prefix + body;
+            })
+            .catch(err => {
+                if (previewEl && window.getT) {
+                    previewEl.setAttribute('data-i18n', 'msg_preview_failed');
+                    previewEl.innerText = window.getT('msg_preview_failed', 'Preview failed.');
+                }
+            });
+        };
+
+        window.togglePromptModes = function(type, triggerChange = true) {
+            const modeEl = document.getElementById(`${type}_prompt_mode`);
+            if (!modeEl) return;
+            const mode = modeEl.value;
+            const textCont = document.getElementById(`${type}_text_container`);
+            const fileCont = document.getElementById(`${type}_file_container`);
+            const textInput = document.getElementById(`${type}_text_input`);
+            const fileInput = document.getElementById(`${type}_file_input`);
+
+            if (mode === 'TEXT') {
+                if(textCont) textCont.style.display = 'flex';
+                if(fileCont) fileCont.style.display = 'none';
+                if(textInput) { textInput.disabled = false; }
+                if(fileInput) { fileInput.disabled = true; }
+                if(triggerChange && textInput) textInput.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                if(textCont) textCont.style.display = 'none';
+                if(fileCont) fileCont.style.display = 'block';
+                if(textInput) { textInput.disabled = true; }
+                if(fileInput) { fileInput.disabled = false; }
+                if(window.loadPreview) window.loadPreview(`${type}_file_input`);
+                if(triggerChange && fileInput) fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        };
+
+        (function() {
+            const providerSelect = document.getElementById('LLM_PROVIDER');
+            function toggleProviders() {
+                if (!providerSelect) return;
+                const selected = providerSelect.value;
+                document.querySelectorAll('.provider-frame').forEach(frame => {
+                    frame.classList.add('hidden-frame');
+                    frame.style.display = '';
+                });
+                const activeFrame = document.getElementById('provider-' + selected);
+                if(activeFrame) {
+                    activeFrame.classList.remove('hidden-frame');
+                }
+            }
+
+            function frameHasUnsavedEdits(provider) {
+                const frame = document.getElementById('provider-' + provider);
+                return !!(frame && frame.querySelector('.dirty-field'));
+            }
+
+            function revertProviderFrame(provider) {
+                const frame = document.getElementById('provider-' + provider);
+                if (!frame) return;
+                frame.querySelectorAll('input, select, textarea').forEach(el => {
+                    if (!el.name || el.type === 'hidden') return;
+                    if (el.name.indexOf('ENV_TOKENS.') === 0) {
+                        el.value = '';
+                    } else {
+                        const val = window.originalState ? window.originalState[el.name] : undefined;
+                        if (val !== undefined) {
+                            if (el.type === 'checkbox') el.checked = (val === 'true' || val === true);
+                            else el.value = val;
+                        }
+                    }
+                    if (window.draftState) {
+                        if (window.originalState && window.originalState[el.name] !== undefined) {
+                            window.draftState[el.name] = window.originalState[el.name];
+                        } else {
+                            delete window.draftState[el.name];
+                        }
+                    }
+                    if (window.applyErrors) delete window.applyErrors[el.name];
+                    el.classList.remove('dirty-field');
+                    el.classList.remove('error-field');
+                });
+                if (window.renderErrors) window.renderErrors();
+                if (window.updateGlobalControls) window.updateGlobalControls();
+            }
+
+            let currentProvider = providerSelect ? providerSelect.value : '';
+
+            function onProviderChange() {
+                const next = providerSelect.value;
+                if (next === currentProvider) { toggleProviders(); return; }
+                const prev = currentProvider;
+                if (!frameHasUnsavedEdits(prev)) {
+                    currentProvider = next;
+                    toggleProviders();
+                    return;
+                }
+                providerSelect.value = prev;
+                providerSelect.dispatchEvent(new Event('input', { bubbles: true }));
+                toggleProviders();
+                const msg = window.getT(
+                    'confirm_discard_provider_edits',
+                    "You have unsaved changes for provider '{provider}'. Discard them and switch?"
+                ).split('{provider}').join(prev);
+                window.appConfirm(msg).then(ok => {
+                    if (!ok) return;
+                    revertProviderFrame(prev);
+                    currentProvider = next;
+                    providerSelect.value = next;
+                    providerSelect.dispatchEvent(new Event('input', { bubbles: true }));
+                    toggleProviders();
+                });
+            }
+
+            if(providerSelect) {
+                providerSelect.addEventListener('change', onProviderChange);
+                toggleProviders();
+            }
+
+            window.togglePromptModes('user', false);
+            window.togglePromptModes('sys', false);
+        })();
+    </script>
+</form>

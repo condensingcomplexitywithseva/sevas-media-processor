@@ -1,0 +1,3 @@
+# Normalize line endings: everything Git detects as text is stored LF in the
+# repository; working-tree endings follow each machine's core.autocrlf.
+* text=auto

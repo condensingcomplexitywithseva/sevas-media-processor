@@ -1,0 +1,99 @@
+
+<div style="max-width: 600px; padding-top: 0px;">
+    <div style="display: flex; flex-direction: column; gap: 16px; align-items: flex-start;">
+        <button onclick="window.exportDatabase()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px;">
+            📊 <span data-i18n="btn_export_db">Export Last Run's Database to CSV/XLSX</span>
+        </button>
+
+        <div id="export-db-result" style="display:none;">
+            <span class="hint" data-i18n="lbl_exported_to">Exported to:</span>
+            <code id="export-db-path" style="display:inline-block; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;"></code>
+            <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle;" onclick='copyTextToClipboard(document.getElementById("export-db-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+        </div>
+
+        <button onclick="window.exportLogs()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px;">
+            📄 <span data-i18n="btn_export_log">Export This Session's Log</span>
+        </button>
+        <div id="export-log-result" style="display:none;">
+            <span class="hint" data-i18n="lbl_exported_to">Exported to:</span>
+            <code id="export-log-path" style="display:inline-block; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;"></code>
+            <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle;" onclick='copyTextToClipboard(document.getElementById("export-log-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+        </div>
+
+        <button onclick="window.openLogsFolder()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px;">
+            🔍 <span data-i18n="btn_all_logs_folder">All System Logs from Previous Sessions</span>
+        </button>
+
+        <div>
+            <code id="logs-path-display" style="display:inline-block; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;">{{ log_path }}</code>
+            <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle;" onclick='copyTextToClipboard(document.getElementById("logs-path-display").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+        </div>
+
+        <button onclick="window.clearLogs()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid red; color: red; border-radius: 4px;">
+            🗑️ <span data-i18n="btn_clear_logs">Clear System Logs</span>
+        </button>
+    </div>
+</div>
+
+<script>
+    window.showExportResult = function(rowId, pathId, path) {
+        document.getElementById(pathId).innerText = path;
+        document.getElementById(rowId).style.display = 'block';
+    };
+
+    window.openLogsFolder = function() {
+        fetch('/api/export/open_logs_folder', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status !== 'success') {
+                    let errorMessage = data.message_key ? window.getT(data.message_key, data.message) : data.message;
+                    window.showToast(errorMessage, true);
+                }
+            })
+            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+    };
+
+    window.exportDatabase = function() {
+        fetch('/api/export/database', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    window.showToast((window.getT('alert_db_success', 'Database successfully exported to:') + ' ') + data.path);
+                    window.showExportResult('export-db-result', 'export-db-path', data.path);
+                } else {
+                    let errorMessage = data.message_key ? window.getT(data.message_key, data.message) : data.message;
+                    window.showToast((window.getT('alert_db_fail', 'Failed to export database:') + ' ') + errorMessage, true);
+                }
+            })
+            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+    };
+
+    window.clearLogs = async function() {
+        if (!await window.appConfirm(window.getT('confirm_clear_logs', 'Are you sure you want to delete all historical logs? The active log for the current session will be kept.'))) return;
+        fetch('/api/export/clear_logs', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    window.showToast(window.getT('toast_logs_cleared', 'Historical logs have been cleared.'));
+                } else {
+                    window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + data.message, true);
+                }
+            })
+            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+    };
+
+    window.exportLogs = function() {
+        fetch('/api/export/logs', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    window.showToast((window.getT('alert_log_success', 'System log exported to:') + ' ') + data.path);
+                    window.showExportResult('export-log-result', 'export-log-path', data.path);
+                } else {
+                    let errorMessage = data.message_key ? window.getT(data.message_key, data.message) : data.message;
+                    window.showToast((window.getT('alert_log_fail', 'Failed to export the system log:') + ' ') + errorMessage, true);
+                }
+            })
+            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+    };
+</script>

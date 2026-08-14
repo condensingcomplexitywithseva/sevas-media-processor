@@ -1,0 +1,106 @@
+
+<form id="general-settings-form" onsubmit="event.preventDefault();" novalidate>
+    <div class="form-group border-b" style="padding-bottom: 20px;">
+        <label data-i18n="lbl_language">Interface Language:</label>
+        <div class="input-row">
+            <select id="language" name="GUI_LANGUAGE" onchange="changeLanguage(this.value)"> 
+                {% for code, name in available_locales.items() %}
+                <option value="{{ code }}" {% if settings.GUI_LANGUAGE == code %}selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_main_mode">Main Application Mode:</label>
+        <div class="input-row">
+            <select id="ENABLE_LLM_INFERENCE" name="ENABLE_LLM_INFERENCE">
+                <option value="false" {% if not settings.ENABLE_LLM_INFERENCE %}selected{% endif %} data-i18n="opt_jpeg">Turn media files to JPEGs</option>
+                <option value="true" {% if settings.ENABLE_LLM_INFERENCE %}selected{% endif %} data-i18n="opt_ai">Analyze files with AI</option>
+            </select>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("ENABLE_LLM_INFERENCE", {{ default_settings.ENABLE_LLM_INFERENCE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <div id="err-ENABLE_LLM_INFERENCE" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_input_folder">Input Folder Path:</label>
+        <div class="input-row">
+            <input type="text" id="input_folder_path" name="INPUT_FOLDER_PATH" value="{{ settings.INPUT_FOLDER_PATH }}">
+        </div>
+        <div class="input-row" style="margin-top: 8px;">
+            <button type="button" onclick="browseOS('folder', 'input_folder_path')" style="padding: 0 15px; cursor: pointer; border: 1px solid var(--border-color); background: white; border-radius: 4px; height: 34px; display:flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;">📁 <span data-i18n="btn_browse_folder">Choose another folder</span></button>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("INPUT_FOLDER_PATH", {{ default_settings.INPUT_FOLDER_PATH | string | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_input_folder">The directory containing the raw media files you wish to process.</span>
+        <div id="err-INPUT_FOLDER_PATH" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_output_folder">Output Folder Path:</label>
+        <div class="input-row">
+            <input type="text" id="output_folder_path" name="OUTPUT_FOLDER_PATH" value="{{ settings.OUTPUT_FOLDER_PATH }}">
+        </div>
+        <div class="input-row" style="margin-top: 8px;">
+            <button type="button" onclick="browseOS('folder', 'output_folder_path')" style="padding: 0 15px; cursor: pointer; border: 1px solid var(--border-color); background: white; border-radius: 4px; height: 34px; display:flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;">📁 <span data-i18n="btn_browse_folder">Choose another folder</span></button>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("OUTPUT_FOLDER_PATH", {{ default_settings.OUTPUT_FOLDER_PATH | string | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_output_folder">The directory where the processed JPEGs and text files will be saved.
+Note: In case of disk errors, a panic log may be saved to the desktop as a fallback.</span>
+        <div id="err-OUTPUT_FOLDER_PATH" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <div class="input-row" style="width: auto;">
+            <input type="hidden" name="START_OVER" value="false">
+            <input type="checkbox" id="START_OVER" name="START_OVER" value="true" {% if settings.START_OVER %}checked{% endif %} style="width: auto; max-width: none;">
+            <label for="START_OVER" style="margin: 0; padding-right: 10px;" data-i18n="lbl_start_over">Start a fresh new run:</label>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("START_OVER", {{ default_settings.START_OVER | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_start_over" style="margin-bottom: 20px;">Moves old output into an archive folder before starting a fresh new run.</span>
+    </div>
+
+    <div class="section-header" data-i18n="lbl_adv_general">Advanced Settings (Do not change unless certain)</div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_logging_level">Console Logging Level:</label>
+        <div class="input-row">
+            <select name="LOGGING_LEVEL" id="LOGGING_LEVEL">
+                {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] %}
+                    <option value="{{ level }}" {% if settings.LOGGING_LEVEL == level %}selected{% endif %}>{{ level }}</option>
+                {% endfor %}
+            </select>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("LOGGING_LEVEL", {{ default_settings.LOGGING_LEVEL | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_logging_level">Select the detail level printed to the live console:
+• DEBUG: Everything (Extremely verbose)
+• INFO: Normal updates and progress
+• WARNING: Minor issues that do not halt the program
+• ERROR: Failed tasks or skipped files
+• CRITICAL: Application crashes
+
+Deviation: Third-party libraries (Pillow, AV, urllib3) are capped at INFO level even in DEBUG mode to prevent binary dumps.</span>
+        <div id="err-LOGGING_LEVEL" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_no_retry">No-Retry Statuses:</label>
+        <div class="input-row" style="align-items: flex-start;">
+            <div class="checkbox-group" id="NO_RETRY_STATUSES" style="display: flex; flex-direction: column; gap: 5px; height: 145px; overflow-y: auto; border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; width: 100%; background: white;">
+                <input type="hidden" name="NO_RETRY_STATUSES" value="">
+
+                {% set current_no_retry = settings.NO_RETRY_STATUSES if settings.NO_RETRY_STATUSES is not string else [] %}
+                {% for status in ['ok', 'failure', 'partial failure', 'skipped', 'llm_failed', 'llm_partial'] %}
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; margin: 0; cursor: pointer;">
+                        <input type="checkbox" name="NO_RETRY_STATUSES" value="{{ status }}" {% if status in current_no_retry %}checked{% endif %} style="width: auto; margin: 0;">
+                        {{ status }}
+                    </label>
+                {% endfor %}
+            </div>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("NO_RETRY_STATUSES", {{ default_settings.NO_RETRY_STATUSES | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_no_retry">By default, only files that successfully processed ('OK') are skipped on subsequent runs.
+Select other statuses here if you want to skip them as well.</span>
+        <div id="err-NO_RETRY_STATUSES" class="error-text"></div>
+    </div>
+</form>

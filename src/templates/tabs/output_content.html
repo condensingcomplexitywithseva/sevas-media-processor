@@ -1,0 +1,97 @@
+
+<form id="output-settings-form" onsubmit="event.preventDefault();" novalidate>
+    <div class="form-group" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <span style="font-weight: bold;" data-i18n="lbl_size_pipeline">How the file size is controlled:</span>
+        <span class="hint" data-i18n="hint_size_pipeline" style="margin-top: 10px;">1. The image is shrunk so its longest side fits Max Resolution (small images are never enlarged).
+2. Quality is lowered step by step from maximum to minimum until the file fits under the Target File Size.
+3. Quality never drops below Min Allowed Quality — if the file still does not fit, it is saved larger than the target, and the report says so.
+Files still too large? Lower Max Resolution — it is by far the strongest lever.</span>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_max_dim">Max Resolution (px):</label>
+        <div class="input-row" style="max-width: 250px;">
+            <input type="text" inputmode="numeric" id="MAX_DIMENSION" name="MAX_DIMENSION" value="{{ settings.MAX_DIMENSION }}">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("MAX_DIMENSION", {{ default_settings.MAX_DIMENSION | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_max_dim">The strongest file-size lever. Images larger than this are shrunk proportionally (both sides equally, no distortion) until their longest side equals this value; smaller images are never enlarged.
+Halving this value roughly quarters the file size.
+Must be &gt;= 1.
+Reference values:
+• 3840 (4K) = maximum detail
+• 2560 (QHD) = balanced
+• 1920 (Full HD) = compact files</span>
+        <div id="err-MAX_DIMENSION" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_jpeg_quality">Maximum Image Quality (Crispness):</label>
+        <div class="input-row" style="max-width: 250px;">
+            <input type="text" inputmode="numeric" id="JPEG_QUALITY" name="JPEG_QUALITY" value="{{ settings.JPEG_QUALITY }}">
+            <span style="font-weight: bold; color: var(--hint-color); padding-right: 5px;">%</span>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("JPEG_QUALITY", {{ default_settings.JPEG_QUALITY | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_jpeg_quality">Determines how sharp the image should look. Bounds: 1 to 100.
+• 90 = High Quality (Recommended)
+• 75 = Good Quality (Web Standard)
+• 50 = Medium Quality
+• 20 = Lowest acceptable (below this, our tests showed visible discoloration)
+• 10 = Terrible Quality (Heavy compression)</span>
+        <div id="err-JPEG_QUALITY" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_lowest_qual">Min Allowed Quality:</label>
+        <div class="input-row" style="max-width: 250px;">
+            <input type="text" inputmode="numeric" id="LOWEST_QUALITY" name="LOWEST_QUALITY" value="{{ settings.LOWEST_QUALITY }}">
+            <span style="font-weight: bold; color: var(--hint-color); padding-right: 5px;">%</span>
+            <button type="button" class="btn-default" onclick='resetDefaultByName("LOWEST_QUALITY", {{ default_settings.LOWEST_QUALITY | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_lowest_qual">The quality level the app refuses to go below, even if the file then exceeds the Target File Size.
+Without this floor, the app would keep degrading an image just to hit a size number.
+In our testing, a floor of 10 produced visibly discolored photos, while 20 still looked good — hence the default of 20.
+Bounds: 1 to 100.</span>
+        <div id="err-LOWEST_QUALITY" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_max_size">Target File Size (KB):</label>
+        <div class="input-row" style="max-width: 250px;">
+            <input type="text" inputmode="numeric" id="MAX_FILE_SIZE_KB" name="MAX_FILE_SIZE_KB" value="{{ settings.MAX_FILE_SIZE_KB }}">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("MAX_FILE_SIZE_KB", {{ default_settings.MAX_FILE_SIZE_KB | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_max_size">A soft target, not a hard limit.
+The app reduces image quality until the file fits under this size.
+If even the Min Allowed Quality is not small enough, the file is saved anyway — larger than this target — and the report notes it.
+To make files reliably smaller, lower Max Resolution instead.
+Must be &gt;= 1.</span>
+        <div id="err-MAX_FILE_SIZE_KB" class="error-text"></div>
+    </div>
+
+    <div class="section-header" data-i18n="lbl_adv_general">Advanced Settings (Do not change unless certain)</div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_white_bg">White Canvas RGB:</label>
+        <div class="input-row">
+            {% if settings.WHITE_BACKGROUND is string %}
+                <input type="text" id="WHITE_BACKGROUND" name="WHITE_BACKGROUND" value="{{ settings.WHITE_BACKGROUND }}">
+            {% else %}
+                <input type="text" id="WHITE_BACKGROUND" name="WHITE_BACKGROUND" value="{{ settings.WHITE_BACKGROUND[0] }},{{ settings.WHITE_BACKGROUND[1] }},{{ settings.WHITE_BACKGROUND[2] }}">
+            {% endif %}
+            <button type="button" class="btn-default" onclick='resetDefaultByName("WHITE_BACKGROUND", {{ default_settings.WHITE_BACKGROUND | join(",") | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_white_bg">Provide an RGB tuple (e.g., 255,255,255) used to fill in transparent areas when flattening PNG images into JPEG format.</span>
+        <div id="err-WHITE_BACKGROUND" class="error-text"></div>
+    </div>
+
+    <div class="form-group">
+        <label data-i18n="lbl_pillow_max">Giant Image Safety Limit:</label>
+        <div class="input-row" style="max-width: 300px;">
+            <input type="text" inputmode="numeric" id="PILLOW_MAX_PIXELS" name="PILLOW_MAX_PIXELS" value="{{ settings.PILLOW_MAX_PIXELS }}">
+            <button type="button" class="btn-default" onclick='resetDefaultByName("PILLOW_MAX_PIXELS", {{ default_settings.PILLOW_MAX_PIXELS | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
+        </div>
+        <span class="hint" data-i18n="hint_pillow_max">Upper limit on the pixel count of a single image; protects memory when reading very large or very dense images.
+Must be &gt;= 1.</span>
+        <div id="err-PILLOW_MAX_PIXELS" class="error-text"></div>
+    </div>
+</form>
