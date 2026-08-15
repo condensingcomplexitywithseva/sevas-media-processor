@@ -5,7 +5,8 @@
 import traceback
 import hashlib
 from pathlib import Path
-from typing import Union, Tuple, Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 if TYPE_CHECKING:
     from range_parsers import PageRangeSelector, VideoSelector
@@ -19,7 +20,8 @@ from pipelines.static_image import StaticImagePipeline
 from to_jpeg_converter import ToJpegConverter
 
 ANIMATED_IMAGE_EXTENSIONS = frozenset([".gif", ".webp"])
-IMAGE_EXTENSIONS = frozenset([".jpeg", ".jpg", ".jpe", ".jfif", ".png", ".bmp", ".dib", ".tif", ".tiff", ".heic", ".heif", ".avif"])
+IMAGE_EXTENSIONS = frozenset([".jpeg", ".jpg", ".jpe", ".jfif", ".png", ".bmp", ".dib",
+                              ".tif", ".tiff", ".heic", ".heif", ".avif"])
 PDF_EXTENSIONS = frozenset([".pdf"])
 VIDEO_EXTENSIONS = frozenset([".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm"])
 
@@ -45,20 +47,22 @@ class MediaClassifier:
         self.video_selector = video_time_selector
 
     @staticmethod
-    def relative_or_orphan(target_path: Path, root_folder: Path) -> Tuple[str, bool]:
+    def relative_or_orphan(target_path: Path, root_folder: Path) -> tuple[str, bool]:
         target_path = Path(target_path)
         try:
             return str(target_path.relative_to(Path(root_folder))), False
         except ValueError:
-            path_hash = hashlib.md5(str(target_path.resolve()).encode("utf-8")).hexdigest()[:8]
+            path_hash = hashlib.md5(
+                str(target_path.resolve()).encode("utf-8"), usedforsecurity=False
+            ).hexdigest()[:8]
             return f"unresolved_orphaned_{path_hash}_{target_path.name}", True
 
     def evaluate_and_route(
         self,
         unique_file_id: int,
-        raw_input_path: Union[str, Path],
-        raw_root_input_folder: Union[str, Path],
-    ) -> Tuple[str, str, str, Generator[PageResult, None, FileSummary], bool]:
+        raw_input_path: str | Path,
+        raw_root_input_folder: str | Path,
+    ) -> tuple[str, str, str, Generator[PageResult, None, FileSummary], bool]:
 
         try:
             target_path = Path(str(raw_input_path)) if raw_input_path else Path("INVALID_FILE_PATH")
@@ -148,13 +152,13 @@ class MediaClassifier:
             return self._build_rejection_payload(
                 relative_path,
                 extension,
-                f"Internal routing crash: {str(routing_crash)}{fallback_msg}\n{traceback.format_exc()}",
+                f"Internal routing crash: {routing_crash!s}{fallback_msg}\n{traceback.format_exc()}",
                 is_orphaned,
             )
 
     def _build_rejection_payload(
         self, relative_path: str, extension: str, error_msg: str, is_orphaned: bool
-    ) -> Tuple[str, str, str, Generator[PageResult, None, FileSummary], bool]:
+    ) -> tuple[str, str, str, Generator[PageResult, None, FileSummary], bool]:
         def rejection_generator() -> Generator[PageResult, None, FileSummary]:
             yield PageResult(
                 page_number=1, output_filename="", success=Status.FAILURE.value, comment=error_msg

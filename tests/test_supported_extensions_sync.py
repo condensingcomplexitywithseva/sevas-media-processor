@@ -125,7 +125,11 @@ def test_every_routed_image_extension_opens_through_the_allowlist(extension):
 
 
 def test_the_allowlist_carries_no_format_no_routed_extension_needs():
-    needed = {registered_format_for(extension) for extension in PILLOW_ROUTED}
+    needed = set()
+    for extension in PILLOW_ROUTED:
+        fmt = registered_format_for(extension)
+        assert fmt is not None, f"no Pillow format registered for {extension}"
+        needed.add(fmt)
     stale = set(to_jpeg_converter.SUPPORTED_OPEN_FORMATS) - needed
     assert stale == set(), (
         "no routed extension needs these formats any more, and an allowlist "

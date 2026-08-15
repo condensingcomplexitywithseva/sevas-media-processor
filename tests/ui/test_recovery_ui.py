@@ -142,11 +142,11 @@ def test_refused_save_says_the_file_is_unreadable_not_invalid(open_page):
     )
     page.wait_for_timeout(500)
 
-    lines = [l for l in console_lines(page) if "REFUSED" in l]
+    lines = [line for line in console_lines(page) if "REFUSED" in line]
     assert len(lines) == 1, f"expected exactly one refusal line, got {lines}"
     assert "cannot be read" in lines[0]
     assert "nothing was written" in lines[0]
-    assert not any("validation errors" in l for l in console_lines(page)), \
+    assert not any("validation errors" in line for line in console_lines(page)), \
         "a refusal must not be reported as a validation failure"
 
 
@@ -162,7 +162,7 @@ def test_a_real_validation_failure_still_says_validation(open_page):
     )
     page.wait_for_timeout(500)
 
-    assert not any("REFUSED" in l for l in console_lines(page)), \
+    assert not any("REFUSED" in line for line in console_lines(page)), \
         "a validation failure must not be reported as a refusal"
 
 

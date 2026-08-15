@@ -3,7 +3,8 @@
 
 
 from pathlib import Path
-from typing import Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 if TYPE_CHECKING:
     from range_parsers import PageRangeSelector
@@ -12,6 +13,7 @@ from fs_utils import get_safe_path
 from schemas import Status, RangeStatus, PageResult, FileSummary
 from pipelines.base_pipeline import BaseMediaPipeline
 from to_jpeg_converter import ToJpegConverter, open_supported_image
+import contextlib
 
 
 class StaticImagePipeline(BaseMediaPipeline):
@@ -64,7 +66,7 @@ class StaticImagePipeline(BaseMediaPipeline):
                 if not indices:
                     return self.finalize_results(
                         0, 0, 0, 0, total_pages, "", range_status,
-                        error_summaries + ["Skipped by range limits"],
+                        [*error_summaries, "Skipped by range limits"],
                     )
 
                 for current_index in indices:
@@ -97,10 +99,8 @@ class StaticImagePipeline(BaseMediaPipeline):
 
                     finally:
                         if detached_image_copy:
-                            try:
+                            with contextlib.suppress(Exception):
                                 detached_image_copy.close()
-                            except Exception:
-                                pass
 
                     if mpo_note:
                         page_comment = (

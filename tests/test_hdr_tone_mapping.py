@@ -4,6 +4,7 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -44,7 +45,7 @@ def synth_yuv16(y_code, u_code, v_code, bit_depth, size=(16, 16)):
 
 
 
-HAND_COMPUTED_PATCHES = [
+HAND_COMPUTED_PATCHES: list[tuple[str, int, bool, tuple[int, int, int], tuple[int, int, int]]] = [
     ("HLG", 10, False, (940, 512, 512), (255, 255, 255)),
     ("HLG", 10, False, (64, 512, 512), (0, 0, 0)),
     ("HLG", 10, False, (502, 512, 512), (100, 100, 100)),
@@ -65,7 +66,8 @@ HAND_COMPUTED_PATCHES = [
     "transfer,bit_depth,full_range,codes,expected", HAND_COMPUTED_PATCHES
 )
 def test_hand_computed_patches_pin_the_whole_chain(
-    transfer, bit_depth, full_range, codes, expected
+    transfer: str, bit_depth: int, full_range: bool,
+    codes: tuple[int, int, int], expected: tuple[int, int, int],
 ):
     arr = synth_yuv16(*codes, bit_depth)
     out = hdr_yuv16_to_srgb(arr, bit_depth, full_range, transfer)
@@ -130,18 +132,18 @@ def test_detection_trusts_only_the_declared_transfer(color_trc, expected):
 MAX_DIMENSION = 1000
 
 
-def make_settings(**overrides):
-    values = dict(
-        MAX_DIMENSION=MAX_DIMENSION,
-        OUTPUT_FILENAME_PREFIX_LENGTH=20,
-        OUTPUT_FILENAME_TIMESTAMPS=True,
-        VIDEO_MODE="SUMMARY",
-        VIDEO_SUMMARY_TARGET_TOTAL_FRAMES=3,
-        VIDEO_SUMMARY_SCENE_SENSITIVITY=0.0,
-        VIDEO_SAMPLING_CAPTURE_RATE_FPS=2.0,
-        VIDEO_SAMPLING_MAX_FRAMES_BUDGET=100,
-        VIDEO_SAMPLING_SCENE_SENSITIVITY=0.0,
-    )
+def make_settings(**overrides) -> SimpleNamespace:
+    values: dict[str, Any] = {
+        "MAX_DIMENSION": MAX_DIMENSION,
+        "OUTPUT_FILENAME_PREFIX_LENGTH": 20,
+        "OUTPUT_FILENAME_TIMESTAMPS": True,
+        "VIDEO_MODE": "SUMMARY",
+        "VIDEO_SUMMARY_TARGET_TOTAL_FRAMES": 3,
+        "VIDEO_SUMMARY_SCENE_SENSITIVITY": 0.0,
+        "VIDEO_SAMPLING_CAPTURE_RATE_FPS": 2.0,
+        "VIDEO_SAMPLING_MAX_FRAMES_BUDGET": 100,
+        "VIDEO_SAMPLING_SCENE_SENSITIVITY": 0.0,
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -195,10 +197,12 @@ def make_tagged_video(path, color_trc, y_code=126, u_code=128, v_code=128):
     return path
 
 
-def center_pixel(jpeg_path):
+def center_pixel(jpeg_path) -> tuple[int, ...]:
     with Image.open(jpeg_path) as image:
         image.load()
-        return image.getpixel((image.width // 2, image.height // 2))
+        pixel = image.getpixel((image.width // 2, image.height // 2))
+        assert isinstance(pixel, tuple)
+        return pixel
 
 
 HDR_NOTE_HLG = "HDR video (HLG) tone-mapped to SDR (BT.2446-A)"
@@ -247,7 +251,7 @@ def test_untagged_control_stays_naive_and_note_free(tmp_path, monkeypatch):
     monkeypatch.setattr(video_module, "detect_hdr_transfer", lambda cc: None)
     results_off, _ = run_video(video, tmp_path / "out_b")
 
-    for on, off in zip(results, results_off):
+    for on, off in zip(results, results_off, strict=True):
         bytes_on = (tmp_path / "out_a" / on.output_filename).read_bytes()
         bytes_off = (tmp_path / "out_b" / off.output_filename).read_bytes()
         assert bytes_on == bytes_off, (

@@ -60,9 +60,7 @@ class DeepSeekServer(ProviderServer):
         thinking = body.get("thinking")
         if isinstance(thinking, dict) and thinking.get("type") == "enabled":
             return True
-        if "reasoning_effort" in body:
-            return True
-        return False
+        return "reasoning_effort" in body
 
 
     def chat_completions(self):
@@ -166,7 +164,7 @@ class DeepSeekServer(ProviderServer):
 
 
     def list_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._auth_error()
@@ -180,7 +178,7 @@ class DeepSeekServer(ProviderServer):
 
 
     def user_balance(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._auth_error()

@@ -24,7 +24,9 @@ from fake_llm.generic import (
 )
 from fake_llm.harness import KEY_SHAPED_TOKENS
 
-FAKE_TOKEN = KEY_SHAPED_TOKENS["openai"]
+_openai_fake_token = KEY_SHAPED_TOKENS["openai"]
+assert _openai_fake_token is not None
+FAKE_TOKEN: str = _openai_fake_token
 
 
 @pytest.fixture
@@ -34,7 +36,8 @@ def server():
     srv.stop()
 
 
-def make_wire_client(server, provider_overrides=None, token=FAKE_TOKEN,
+def make_wire_client(server, provider_overrides=None,
+                     token: str | None = FAKE_TOKEN,
                      **settings_overrides):
     provider = SimpleNamespace(
         url=server.url,
@@ -457,6 +460,7 @@ def test_every_shipped_provider_preset_round_trips(server, jpegs, provider_name)
         assert "max_tokens" not in payload
 
     if config.auth_header_key:
+        assert config.auth_header_format is not None
         expected = config.auth_header_format.replace("{token}", FAKE_TOKEN)
         assert headers.get(config.auth_header_key.lower()) == expected
     else:

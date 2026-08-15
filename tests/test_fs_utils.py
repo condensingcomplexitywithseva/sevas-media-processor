@@ -63,7 +63,7 @@ def test_deep_paths_beyond_260_chars_are_actually_usable(tmp_path):
     os.makedirs(get_safe_path(deep), exist_ok=True)
     with open(get_safe_path(deep_file), "w", encoding="utf-8") as handle:
         handle.write("made it")
-    with open(get_safe_path(deep_file), "r", encoding="utf-8") as handle:
+    with open(get_safe_path(deep_file), encoding="utf-8") as handle:
         assert handle.read() == "made it"
 
 

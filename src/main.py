@@ -12,13 +12,17 @@ try:
     from tkinter import messagebox
     has_tkinter = True
 except ImportError:
+    tk = None
+    messagebox = None
     has_tkinter = False
 from logging.handlers import MemoryHandler
 from pathlib import Path
+from typing import Any
 import json
 import locale
 
 from fs_utils import get_safe_path
+import contextlib
 
 def _read_preboot_locale() -> dict:
     try:
@@ -37,7 +41,7 @@ def _read_preboot_locale() -> dict:
         target_json = "en.json"
 
     try:
-        with open(locales_dir / target_json, "r", encoding="utf-8") as f:
+        with open(locales_dir / target_json, encoding="utf-8") as f:
             parsed = json.load(f)
             return parsed if isinstance(parsed, dict) else {}
     except Exception:
@@ -71,7 +75,7 @@ logging.basicConfig(
 
 logging.info("Bootstrapping Flask environment...")
 
-def write_fatal_panic_log(error_details_string: str, app_root: Path = None) -> None:
+def write_fatal_panic_log(error_details_string: str, app_root: Path | None = None) -> None:
     import json
 
     if app_root is None:
@@ -81,7 +85,7 @@ def write_fatal_panic_log(error_details_string: str, app_root: Path = None) -> N
     try:
         settings_file = app_root / "settings.json"
         if settings_file.exists():
-            with open(settings_file, "r", encoding="utf-8") as sf:
+            with open(settings_file, encoding="utf-8") as sf:
                 data = json.load(sf)
                 if "OUTPUT_FOLDER_PATH" in data:
                     output_dir = Path(data["OUTPUT_FOLDER_PATH"]).resolve()
@@ -139,7 +143,7 @@ def load_secure_env():
 class Api:
 
     def __init__(self):
-        self._window = None
+        self._window: Any = None
 
     def browse_folder(self):
         if self._window:
@@ -190,10 +194,8 @@ def apply_native_window_icon(window, native_icon):
         form = window.native
 
         def set_icon_on_ui_thread():
-            try:
+            with contextlib.suppress(Exception):
                 form.Icon = icon
-            except Exception:
-                pass
 
         form.BeginInvoke(method_invoker(set_icon_on_ui_thread))
     except Exception:
@@ -288,6 +290,8 @@ def main():
         text_select=True,
         screen=primary_screen
     )
+    if splash_window is None or main_window is None:
+        raise RuntimeError("pywebview did not create the startup windows")
     js_api._window = main_window
 
     splash_loaded_flag = False
@@ -297,10 +301,8 @@ def main():
         nonlocal splash_loaded_flag
         if not splash_loaded_flag and not splash_destroyed_flag:
             splash_loaded_flag = True
-            try:
+            with contextlib.suppress(Exception):
                 splash_window.show()
-            except Exception:
-                pass
 
     splash_window.events.loaded += on_splash_loaded
 
@@ -401,14 +403,10 @@ def main():
             print(f"CRITICAL ERROR: {e}", file=sys.stderr)
             write_fatal_panic_log(crash_trace)
 
-            try:
+            with contextlib.suppress(Exception):
                 splash_window.destroy()
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 main_window.destroy()
-            except Exception:
-                pass
 
     backend_thread = threading.Thread(target=start_backend, daemon=True)
     backend_thread.start()
@@ -444,12 +442,15 @@ def main():
         backend_error = e
 
     if backend_error:
-        if has_tkinter:
+        if has_tkinter and tk is not None and messagebox is not None:
             try:
                 err_root = tk.Tk()
                 err_root.withdraw()
                 err_root.attributes("-topmost", True)
-                messagebox.showerror("Startup Error", f"The application failed to launch.\n\nError: {backend_error}\n\nPlease check the crash log for details.")
+                messagebox.showerror(
+                    "Startup Error",
+                    f"The application failed to launch.\n\nError: {backend_error}"
+                    f"\n\nPlease check the crash log for details.")
                 err_root.destroy()
             except Exception:
                 pass
@@ -460,7 +461,7 @@ def main():
         except Exception:
             pass
 
-        raise RuntimeError(f"Fatal Startup Error: {str(backend_error)}")
+        raise RuntimeError(f"Fatal Startup Error: {backend_error!s}")
 
 if __name__ == "__main__":
     main()

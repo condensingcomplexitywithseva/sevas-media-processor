@@ -134,7 +134,8 @@ def test_csv_registry_round_trips_seeded_content(exported):
     rows = read_csv(find_one(exported, "file_registry_*.csv"))
 
     assert [r["relative_file_path"] for r in rows] == [f[1] for f in FILES]
-    for row, (file_id, rel_path, ext, pages, status, comment, range_str, range_status) in zip(rows, FILES):
+    for row, (file_id, _rel_path, ext, pages, status, comment, range_str,
+              range_status) in zip(rows, FILES, strict=True):
         assert row["unique_file_id"] == str(file_id)
         assert row["original_extension"] == ext
         assert row["total_discovered_pages"] == str(pages)
@@ -150,7 +151,7 @@ def test_csv_page_log_round_trips_seeded_content(exported):
 
     assert len(rows) == len(PAGES)
     for row, (parent_id, page_number, filename, status, comment, _), expected_hms \
-            in zip(rows, PAGES, EXPECTED_CAPTURE_CELLS):
+            in zip(rows, PAGES, EXPECTED_CAPTURE_CELLS, strict=True):
         assert row["parent_file_id"] == str(parent_id)
         assert row["page_or_frame_number"] == str(page_number)
         assert row["saved_filename"] == filename
@@ -169,7 +170,7 @@ def test_xlsx_round_trips_seeded_content(exported):
 
     master = list(workbook["Master Registry"].iter_rows(values_only=True))
     assert list(master[0]) == list(DatabaseFileRegistry.model_fields)
-    by_column = [dict(zip(master[0], row)) for row in master[1:]]
+    by_column = [dict(zip(master[0], row, strict=True)) for row in master[1:]]
     assert [r["relative_file_path"] for r in by_column] == [f[1] for f in FILES]
     assert [r["unique_file_id"] for r in by_column] == [f[0] for f in FILES]
     assert [r["total_discovered_pages"] for r in by_column] == [f[3] for f in FILES]
@@ -177,7 +178,7 @@ def test_xlsx_round_trips_seeded_content(exported):
 
     pages = list(workbook["Page Log - Part 1"].iter_rows(values_only=True))
     assert list(pages[0]) == list(DatabasePageLog.model_fields)
-    page_rows = [dict(zip(pages[0], row)) for row in pages[1:]]
+    page_rows = [dict(zip(pages[0], row, strict=True)) for row in pages[1:]]
     assert len(page_rows) == len(PAGES)
     assert [r["saved_filename"] for r in page_rows] == [p[2] or None for p in PAGES]
     assert [r["execution_status"] for r in page_rows] == [p[3] for p in PAGES]
@@ -210,7 +211,7 @@ def test_xlsx_page_log_splits_into_parts_at_row_limit(tmp_path, monkeypatch):
     for name in part_names:
         rows = list(workbook[name].iter_rows(values_only=True))
         assert list(rows[0]) == headers, f"{name} is missing its header row"
-        collected.extend(dict(zip(headers, row)) for row in rows[1:])
+        collected.extend(dict(zip(headers, row, strict=True)) for row in rows[1:])
 
     assert [len(list(workbook[n].rows)) - 1 for n in part_names] == [5, 5, 2]
     assert [r["page_or_frame_number"] for r in collected] == list(range(1, 13))

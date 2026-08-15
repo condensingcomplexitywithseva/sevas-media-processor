@@ -369,7 +369,7 @@ class AnthropicServer(ProviderServer):
 
 
     def list_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._auth_error()
@@ -393,7 +393,7 @@ class AnthropicServer(ProviderServer):
         })
 
     def get_model(self, model: str):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._auth_error()

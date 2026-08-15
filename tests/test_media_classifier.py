@@ -15,7 +15,9 @@ if str(SRC) not in sys.path:
 import media_classifier
 from media_classifier import MediaClassifier
 from pipelines.base_pipeline import BaseMediaPipeline
+from range_parsers import PageRangeSelector, VideoSelector
 from schemas import FileSummary, PageResult, Status
+from to_jpeg_converter import ToJpegConverter
 
 PIPELINE_ATTRS = ("VideoPipeline", "AnimationPipeline", "DocumentPipeline", "StaticImagePipeline")
 
@@ -36,7 +38,9 @@ EXPECTED_ROUTING = {
 
 def make_classifier():
     return MediaClassifier(
-        SimpleNamespace(), None, Path("out"), None, None, None, None
+        SimpleNamespace(), ToJpegConverter(90, 4096, 500, 10, (255, 255, 255)),
+        Path("out"), PageRangeSelector(""), PageRangeSelector(""),
+        PageRangeSelector(""), VideoSelector("")
     )
 
 
@@ -109,7 +113,7 @@ def test_every_supported_extension_reaches_its_pipeline(
     media_file = tmp_path / f"sample{extension}"
     media_file.write_bytes(b"not really media, but not empty either")
 
-    rel, ext, pipeline_name, generator, orphaned = make_classifier().evaluate_and_route(
+    rel, ext, pipeline_name, _generator, orphaned = make_classifier().evaluate_and_route(
         5, media_file, tmp_path
     )
 
@@ -128,7 +132,7 @@ def test_unsupported_extension_is_rejected_through_the_normal_pathway(
     unsupported = tmp_path / filename
     unsupported.write_bytes(b"some content")
 
-    rel, ext, pipeline_name, generator, orphaned = make_classifier().evaluate_and_route(
+    _rel, _ext, pipeline_name, generator, _orphaned = make_classifier().evaluate_and_route(
         1, unsupported, tmp_path
     )
     results, summary = drain(generator)
@@ -145,7 +149,7 @@ def test_empty_file_is_rejected_before_any_engine_starts(tmp_path, forbidden_pip
     empty = tmp_path / "empty.jpg"
     empty.write_bytes(b"")
 
-    rel, ext, pipeline_name, generator, orphaned = make_classifier().evaluate_and_route(
+    _rel, _ext, pipeline_name, generator, _orphaned = make_classifier().evaluate_and_route(
         1, empty, tmp_path
     )
     results, summary = drain(generator)
@@ -185,7 +189,7 @@ def test_pipeline_construction_crash_degrades_to_a_rejection(tmp_path, monkeypat
     photo = tmp_path / "photo.png"
     photo.write_bytes(b"content")
 
-    rel, ext, pipeline_name, generator, orphaned = make_classifier().evaluate_and_route(
+    _rel, _ext, pipeline_name, generator, _orphaned = make_classifier().evaluate_and_route(
         1, photo, tmp_path
     )
     results, summary = drain(generator)
@@ -201,10 +205,11 @@ def test_pipeline_construction_crash_degrades_to_a_rejection(tmp_path, monkeypat
 class _ProbePipeline(BaseMediaPipeline):
     def process(self):
         yield from ()
+        return FileSummary(0, "", Status.OK.value, Status.OK.value, "")
 
 
 def _naming_probe(relative_path="in.png", **setting_overrides):
-    values = dict(OUTPUT_FILENAME_PREFIX_LENGTH=20, OUTPUT_FILENAME_TIMESTAMPS=True)
+    values = {"OUTPUT_FILENAME_PREFIX_LENGTH": 20, "OUTPUT_FILENAME_TIMESTAMPS": True}
     values.update(setting_overrides)
     return _ProbePipeline(SimpleNamespace(**values), 42, Path(relative_path),
                           relative_path, Path(relative_path).suffix, Path("out"))
@@ -256,8 +261,8 @@ def test_frames_saved_by_a_real_run_are_found_by_the_ai_lookup(tmp_path, monkeyp
     PIL.new("RGB", (40, 30), (200, 10, 10)).save(input_dir / "photo.png")
 
     settings = Settings(
-        INPUT_FOLDER_PATH=str(input_dir),
-        OUTPUT_FOLDER_PATH=str(tmp_path / "output"),
+        INPUT_FOLDER_PATH=input_dir,
+        OUTPUT_FOLDER_PATH=tmp_path / "output",
         ENABLE_LLM_INFERENCE=False,
     )
     ProcessorCore(settings, threading.Event(), on_progress=lambda e: None).run()

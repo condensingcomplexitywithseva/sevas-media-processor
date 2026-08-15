@@ -3,7 +3,7 @@
 
 
 from enum import Enum
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 from dataclasses import dataclass
 
 from fs_utils import humanize_paths
@@ -44,7 +44,7 @@ class PageResult:
     output_filename: str
     success: str
     comment: str
-    capture_seconds: Optional[float] = None
+    capture_seconds: float | None = None
 
     def __post_init__(self):
         self.comment = humanize_paths(self.comment)

@@ -10,11 +10,11 @@ TESTS = Path(__file__).resolve().parent
 if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
-import requests
+import requests  # noqa: F401
 from PIL import Image
 
 from fake_llm import available
-from fake_llm.harness import wire_provider, KEY_SHAPED_TOKENS
+from fake_llm.harness import wire_provider, KEY_SHAPED_TOKENS  # noqa: F401
 
 from schemas import ConfigurationError, Status
 

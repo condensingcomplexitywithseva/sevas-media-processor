@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCALES_DIR = REPO_ROOT / "src" / "locales"
 
 LOCALE_FILES = sorted(LOCALES_DIR.glob("*.json"))
-HAND_EDITED = LOCALE_FILES + [REPO_ROOT / "settings.example.json"]
+HAND_EDITED = [*LOCALE_FILES, REPO_ROOT / "settings.example.json"]
 
 
 def duplicate_keys(text):

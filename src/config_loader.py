@@ -8,7 +8,7 @@ import re
 import threading
 import os
 from pathlib import Path
-from typing import Tuple, Any, Dict, Optional
+from typing import Any, ClassVar
 from pydantic import ValidationError
 
 from config_validator import (
@@ -42,7 +42,7 @@ def _atomic_write_text(target_path: Path, content: str) -> None:
         raise
 
 
-def real_token_updates(env_tokens: Any) -> Dict[str, str]:
+def real_token_updates(env_tokens: Any) -> dict[str, str]:
     if not isinstance(env_tokens, dict):
         return {}
     updates = {}
@@ -74,7 +74,7 @@ class TokenManager:
         with self._lock:
             if self.env_path.exists():
                 try:
-                    with open(self.env_path, "r", encoding="utf-8") as f:
+                    with open(self.env_path, encoding="utf-8") as f:
                         for line in f:
                             if "=" in line:
                                 k, v = line.strip().split("=", 1)
@@ -86,7 +86,7 @@ class TokenManager:
     def get_masked_tokens(self) -> dict:
         tokens = self.get_tokens()
         masked = {}
-        for k in tokens.keys():
+        for k in tokens:
             if k.endswith("_TOKEN"):
                 provider = k.replace("_TOKEN", "").lower().replace("_", "-")
                 masked[provider] = "********"
@@ -134,12 +134,12 @@ class ConfigManager:
     def get_masked_env_tokens(self) -> dict:
         return self.token_manager.get_masked_tokens()
 
-    def load_for_ui(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def load_for_ui(self) -> tuple[dict[str, Any], dict[str, Any]]:
         with self._lock:
             raw_data = {}
             if self.settings_path.exists():
                 try:
-                    with open(self.settings_path, "r", encoding="utf-8") as f:
+                    with open(self.settings_path, encoding="utf-8") as f:
                         raw_data = json.load(f)
                 except Exception as e:
                     logger.critical(f"Failed to read settings.json: {e}")
@@ -157,13 +157,13 @@ class ConfigManager:
             return merged, errors
 
     def validate_draft(
-        self, raw_data: Dict[str, Any]
-    ) -> Tuple[Optional[Settings], Dict[str, Any], Dict[str, Any]]:
+        self, raw_data: dict[str, Any]
+    ) -> tuple[Settings | None, dict[str, Any], dict[str, Any]]:
         return self._validate(raw_data)
 
     def _validate(
-        self, raw_data: Dict[str, Any]
-    ) -> Tuple[Optional[Settings], Dict[str, Any], Dict[str, Any]]:
+        self, raw_data: dict[str, Any]
+    ) -> tuple[Settings | None, dict[str, Any], dict[str, Any]]:
         errors = {}
 
         merged = Settings().model_dump(mode="json")
@@ -214,7 +214,7 @@ class ConfigManager:
             settings_obj = None
         return settings_obj, errors, merged
 
-    _PYDANTIC_TYPE_KEYS = {
+    _PYDANTIC_TYPE_KEYS: ClassVar[dict[str, str]] = {
         "int_parsing": "err_valid_integer",
         "int_type": "err_valid_integer",
         "float_parsing": "err_valid_number",
@@ -223,7 +223,7 @@ class ConfigManager:
     }
     _ERROR_KEY_RE = re.compile(r"err_[a-z_]+")
 
-    def _parse_pydantic_errors(self, e: ValidationError) -> Dict[str, Any]:
+    def _parse_pydantic_errors(self, e: ValidationError) -> dict[str, Any]:
         errors = {}
         for err in e.errors():
             loc = ".".join(str(x) for x in err.get("loc", []))
@@ -250,14 +250,14 @@ class ConfigManager:
             raw_data = {}
             if self.settings_path.exists():
                 try:
-                    with open(self.settings_path, "r", encoding="utf-8") as f:
+                    with open(self.settings_path, encoding="utf-8") as f:
                         raw_data = json.load(f)
                 except json.JSONDecodeError as e:
-                    raise ConfigurationError(f"Settings file is corrupted: {e}")
+                    raise ConfigurationError(f"Settings file is corrupted: {e}") from e
                 except Exception as e:
                     raise ConfigurationError(
                         f"Settings file could not be read: {type(e).__name__}: {e}"
-                    )
+                    ) from e
 
             settings_obj, errors, _ = self._validate(raw_data)
             if errors:
@@ -265,6 +265,7 @@ class ConfigManager:
                 first_err_msg = errors[first_err_loc].get("value", "Validation error")
                 raise ConfigurationError(f"Configuration error at {first_err_loc}: {first_err_msg}")
 
+            assert settings_obj is not None
             return settings_obj
 
     def save_settings(self, settings: Settings):

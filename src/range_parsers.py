@@ -5,7 +5,7 @@
 import logging
 import math
 import numpy as np
-from typing import List, Optional, NamedTuple
+from typing import NamedTuple
 from pydantic import BaseModel, ValidationError, model_validator
 
 from schemas import RangeStatus, ConfigurationError
@@ -14,32 +14,32 @@ logger = logging.getLogger(__name__)
 
 
 class SummaryIndicesResult(NamedTuple):
-    indices: List[int]
+    indices: list[int]
     request_met: bool
     available_frames: int
 
 class SummaryTimesResult(NamedTuple):
-    times: List[float]
+    times: list[float]
     request_met: bool
     segment_duration: float
 
 class SamplingTimesResult(NamedTuple):
-    times: List[float]
+    times: list[float]
     hit_budget_limit: bool
     theoretical_count: int
 
 class PageRangeResult(NamedTuple):
-    indices: List[int]
+    indices: list[int]
     status: str
     details: str
 
 class TimeRangeResult(NamedTuple):
-    times: List[float]
+    times: list[float]
     status: str
     details: str
 
 
-def truncate_visual_ranges(formatted_parts: List[str], limit: int = 10) -> str:
+def truncate_visual_ranges(formatted_parts: list[str], limit: int = 10) -> str:
     if len(formatted_parts) > limit:
         half = int(limit / 2)
         head = formatted_parts[:half]
@@ -80,7 +80,8 @@ def calculate_summary_times(start_sec: float, end_sec: float, target_count: int)
 
     return SummaryTimesResult(final_times, request_met, segment_duration)
 
-def calculate_sampling_times(start_sec: float, end_sec: float, step_seconds: float, max_budget: int) -> SamplingTimesResult:
+def calculate_sampling_times(start_sec: float, end_sec: float, step_seconds: float,
+                             max_budget: int) -> SamplingTimesResult:
     if max_budget <= 0 or step_seconds <= 0 or start_sec >= end_sec:
         return SamplingTimesResult([], False, 0)
 
@@ -96,12 +97,13 @@ def calculate_sampling_times(start_sec: float, end_sec: float, step_seconds: flo
         logger.debug(f"Sampling Math: Theoretical frames ({len(raw_times)}) exceeds budget ({max_budget}). Truncating.")
         raw_times = [start_sec] if max_budget == 1 else raw_times[:max_budget]
 
-    return SamplingTimesResult(sorted(list(raw_times)), hit_budget, theoretical_count)
+    return SamplingTimesResult(sorted(float(t) for t in raw_times),
+                               hit_budget, theoretical_count)
 
 
 class PageSegmentModel(BaseModel):
     start: int
-    end: Optional[int] = None
+    end: int | None = None
 
     @model_validator(mode="after")
     def validate_bounds(self) -> "PageSegmentModel":
@@ -114,11 +116,11 @@ class PageSegmentModel(BaseModel):
 class PageRangeSelector:
     class Segment(NamedTuple):
         start: int
-        end: Optional[int]
+        end: int | None
 
     def __init__(self, range_string: str):
         self.raw_string = range_string
-        self.segments: List[PageRangeSelector.Segment] = []
+        self.segments: list[PageRangeSelector.Segment] = []
         self._compile()
 
     def _compile(self):
@@ -151,7 +153,9 @@ class PageRangeSelector:
 
             except (ValueError, ValidationError) as parsing_error:
                 logger.error(f"Page parser syntax error on part: '{part}'. Reason: {parsing_error}")
-                raise ConfigurationError(f"Invalid page range syntax: '{part}'. Details: {str(parsing_error)}")
+                raise ConfigurationError(
+                    f"Invalid page range syntax: '{part}'. Details: {parsing_error!s}"
+                ) from parsing_error
 
     def calculate_indices(self, total_pages: int) -> PageRangeResult:
         requested_indices = set()
@@ -172,7 +176,7 @@ class PageRangeSelector:
                 if 0 <= index < total_pages:
                     requested_indices.add(index)
 
-        final_indices = sorted(list(requested_indices))
+        final_indices = sorted(requested_indices)
 
         if not final_indices:
             logger.debug(f"Range check: All requested segments were outside file length ({total_pages}).")
@@ -195,7 +199,7 @@ class PageRangeSelector:
         return PageRangeResult(final_indices, status_code, "; ".join(warnings))
 
     @staticmethod
-    def format_range_string(indices: List[int], truncate: bool = True) -> str:
+    def format_range_string(indices: list[int], truncate: bool = True) -> str:
         if not indices:
             return ""
 
@@ -227,7 +231,7 @@ class PageRangeSelector:
 
 class TimeSegmentModel(BaseModel):
     start_sec: float
-    end_sec: Optional[float] = None
+    end_sec: float | None = None
     is_point: bool
 
     @model_validator(mode="after")
@@ -240,12 +244,12 @@ class VideoSelector:
 
     class Segment(NamedTuple):
         start_sec: float
-        end_sec: Optional[float]
+        end_sec: float | None
         is_point: bool
 
     def __init__(self, range_string: str):
         self.raw_string = range_string.strip()
-        self.segments: List[VideoSelector.Segment] = []
+        self.segments: list[VideoSelector.Segment] = []
         self._compile()
 
     def _to_sec(self, time_string: str) -> float:
@@ -269,17 +273,20 @@ class VideoSelector:
             m = float(m_str)
             s = float(s_str)
 
-            if m < 0 or m >= 60: raise ValueError("Minutes must be between 00 and 59")
-            if s < 0 or s >= 60: raise ValueError("Seconds must be between 00 and 59")
-            if h < 0: raise ValueError("Hours cannot be negative")
+            if m < 0 or m >= 60:
+                raise ValueError("Minutes must be between 00 and 59")
+            if s < 0 or s >= 60:
+                raise ValueError("Seconds must be between 00 and 59")
+            if h < 0:
+                raise ValueError("Hours cannot be negative")
 
             return h * 3600 + m * 60 + s
         except ValueError as ve:
             if "Format must be" in str(ve) or "must be between" in str(ve) or "cannot be negative" in str(ve):
                 raise ve
-            raise ValueError(f"Invalid time values in '{time_string}'. Use HH:MM:SS")
-        except Exception:
-            raise ValueError(f"Invalid time format: '{time_string}'. Must be HH:MM:SS")
+            raise ValueError(f"Invalid time values in '{time_string}'. Use HH:MM:SS") from ve
+        except Exception as error:
+            raise ValueError(f"Invalid time format: '{time_string}'. Must be HH:MM:SS") from error
 
     def _compile(self):
         if not self.raw_string:
@@ -298,17 +305,20 @@ class VideoSelector:
                     end_time = self._to_sec(end_string) if end_string.strip() else None
 
                     valid_segment = TimeSegmentModel(start_sec=start_time, end_sec=end_time, is_point=False)
-                    self.segments.append(self.Segment(valid_segment.start_sec, valid_segment.end_sec, valid_segment.is_point))
+                    self.segments.append(self.Segment(
+                        valid_segment.start_sec, valid_segment.end_sec, valid_segment.is_point))
                 else:
                     point_time = self._to_sec(part)
                     self.segments.append(self.Segment(point_time, point_time, True))
 
             except Exception as parsing_error:
                 logger.error(f"Video parser syntax error on part: '{part}'. Reason: {parsing_error}")
-                raise ConfigurationError(f"Strict HH:MM:SS required for '{part}'. Example: 00:00:10. {str(parsing_error)}")
+                raise ConfigurationError(
+                    f"Strict HH:MM:SS required for '{part}'. Example: 00:00:10. {parsing_error!s}"
+                ) from parsing_error
 
     def get_target_times(
-        self, duration: float, mode: str, config: dict, content_end_sec: Optional[float] = None
+        self, duration: float, mode: str, config: dict, content_end_sec: float | None = None
     ) -> TimeRangeResult:
         if duration <= 0:
             return TimeRangeResult([], RangeStatus.SKIPPED.value, f"Invalid duration ({duration:.2f}s)")
@@ -358,9 +368,10 @@ class VideoSelector:
 
                     if sampling_result.hit_budget_limit:
                         has_truncation = True
-                        warnings.append(f"Budget Limit: {config['MAX_FRAMES_BUDGET']}/{sampling_result.theoretical_count}")
+                        warnings.append(f"Budget Limit: {config['MAX_FRAMES_BUDGET']}"
+                                        f"/{sampling_result.theoretical_count}")
 
-        final_times = sorted(list(requested_times))
+        final_times = sorted(requested_times)
         status_code = RangeStatus.OK.value
 
         if has_out_of_bounds:
@@ -377,12 +388,12 @@ class VideoSelector:
         if not final_times:
             logger.debug(f"Video Range Check: All final timestamps stripped/invalid on {duration:.2f}s video.")
             status_code = RangeStatus.SKIPPED.value
-            warnings.append(f"No targets in range")
+            warnings.append("No targets in range")
 
         return TimeRangeResult(final_times, status_code, "; ".join(warnings))
 
     @staticmethod
-    def format_time_range(times: List[float], truncate: bool = True) -> str:
+    def format_time_range(times: list[float], truncate: bool = True) -> str:
         if not times:
             return ""
 

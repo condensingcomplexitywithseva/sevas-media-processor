@@ -7,6 +7,7 @@ import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,15 +31,15 @@ LLM_FAIL = InferenceResult(status=Status.LLM_FAILED.value, answer="[TOTAL LLM NE
 LLM_OK = InferenceResult(status=Status.OK.value, answer="a fine answer", error="")
 
 
-def make_settings(input_dir, **overrides):
-    values = dict(
-        INPUT_FOLDER_PATH=input_dir,
-        NO_RETRY_STATUSES=[Status.OK],
-        JPEG_QUALITY=90,
-        MAX_DIMENSION=4096,
-        ENABLE_LLM_INFERENCE=False,
-        MAX_CONSECUTIVE_LLM_FAILURES=3,
-    )
+def make_settings(input_dir, **overrides) -> SimpleNamespace:
+    values: dict[str, Any] = {
+        "INPUT_FOLDER_PATH": input_dir,
+        "NO_RETRY_STATUSES": [Status.OK],
+        "JPEG_QUALITY": 90,
+        "MAX_DIMENSION": 4096,
+        "ENABLE_LLM_INFERENCE": False,
+        "MAX_CONSECUTIVE_LLM_FAILURES": 3,
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -283,7 +284,7 @@ def test_database_errors_escalate_to_runtime_error(tmp_path):
     input_dir = make_input(tmp_path, "a.png")
 
     class BrokenDb(RecordingDb):
-        def handle_file_started(self, *args):
+        def handle_file_started(self, *args, **kwargs):
             raise SQLAlchemyError("disk gone")
 
     with pytest.raises(RuntimeError, match="Fatal DB Transaction Error"):

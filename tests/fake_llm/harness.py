@@ -29,22 +29,27 @@ KEY_SHAPED_TOKENS: dict[str, str | None] = {
     "lm-studio": None,
 }
 
-_DEFAULT_SETTINGS = dict(
-    MAX_JPEGS_PER_INFERENCE=10,
-    LLM_MAX_RETRIES=1,
-    LLM_TIMEOUT_SECONDS=15,
-    LLM_RETRY_SLEEP_SECONDS=0,
-    HALT_ON_LLM_PARSE_ERROR=True,
-    LLM_SYSTEM_PROMPT="You are a helpful assistant. Output only the text.",
-    LLM_SYSTEM_PROMPT_MODE="TEXT",
-    LLM_USER_PROMPT="Transcribe all text from these images.",
-    LLM_USER_PROMPT_MODE="TEXT",
-)
+_DEFAULT_SETTINGS = {
+    "MAX_JPEGS_PER_INFERENCE": 10,
+    "LLM_MAX_RETRIES": 1,
+    "LLM_TIMEOUT_SECONDS": 15,
+    "LLM_RETRY_SLEEP_SECONDS": 0,
+    "HALT_ON_LLM_PARSE_ERROR": True,
+    "LLM_SYSTEM_PROMPT": "You are a helpful assistant. Output only the text.",
+    "LLM_SYSTEM_PROMPT_MODE": "TEXT",
+    "LLM_USER_PROMPT": "Transcribe all text from these images.",
+    "LLM_USER_PROMPT_MODE": "TEXT",
+}
 
-_AUTO = object()
+class _Auto:
+    pass
 
 
-def build_client(provider_name: str, base_url: str, *, token=_AUTO,
+_AUTO = _Auto()
+
+
+def build_client(provider_name: str, base_url: str, *,
+                 token: str | _Auto | None = _AUTO,
                  **settings_overrides) -> LLMClient:
     preset = _default_provider_configs()[provider_name]
     path = urlparse(preset.url).path or "/"
@@ -57,7 +62,7 @@ def build_client(provider_name: str, base_url: str, *, token=_AUTO,
         LLM_PROVIDER=provider_name,
         **settings_kwargs,
     )
-    if token is _AUTO:
+    if isinstance(token, _Auto):
         token = KEY_SHAPED_TOKENS.get(provider_name)
     return LLMClient(settings, token=token)
 

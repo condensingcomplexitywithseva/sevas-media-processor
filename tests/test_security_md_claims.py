@@ -8,7 +8,6 @@ import re
 import shutil
 import socket
 import subprocess
-import sys
 import threading
 from pathlib import Path
 
@@ -60,6 +59,7 @@ def command_containing(needle):
 
 
 def run_powershell(command, cwd=REPO_ROOT):
+    assert POWERSHELL is not None
     return subprocess.run(
         [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", command],
         cwd=str(cwd), capture_output=True, text=True, timeout=180,
@@ -277,7 +277,7 @@ def test_documented_listener_command_shows_only_a_loopback_listener(loopback_ser
     )
 
 
-@pytest.mark.parametrize("address", ["0.0.0.0", "192.168.1.10", "::"])
+@pytest.mark.parametrize("address", ["0.0.0.0", "192.168.1.10", "::"])  # noqa: S104
 def test_the_loopback_check_rejects_a_non_loopback_address(address):
     listeners = [{"LocalAddress": address, "LocalPort": 5000, "OwningProcess": os.getpid()}]
     off_machine = [
@@ -476,6 +476,7 @@ def _program_stems(text, filename="<snippet>"):
     for node in ast.walk(ast.parse(text)):
         if not _is_spawn_call(node):
             continue
+        assert isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
         index = 1 if node.func.attr.startswith("spawn") else 0
         arg = node.args[index] if len(node.args) > index else None
         if isinstance(arg, (ast.List, ast.Tuple)):

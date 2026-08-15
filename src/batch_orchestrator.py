@@ -11,7 +11,8 @@ from fs_utils import get_safe_path, humanize_paths
 
 class BatchOrchestrator:
 
-    def __init__(self, settings_configuration, database_controller_instance, file_router_instance, system_logger_instance, llm_network_client=None):
+    def __init__(self, settings_configuration, database_controller_instance,
+                 file_router_instance, system_logger_instance, llm_network_client=None):
         self.settings = settings_configuration
         self.input_folder = self.settings.INPUT_FOLDER_PATH
         self.db = database_controller_instance
@@ -33,17 +34,22 @@ class BatchOrchestrator:
         no_retry_values = [status.value for status in self.settings.NO_RETRY_STATUSES]
         processed_paths = self.db.get_successfully_processed_relative_paths(no_retry_values)
 
-        self.logger.app_logger.info(f"Process starting. Next available ID: {current_id + 1}. Skipping {len(processed_paths)} historically completed files.")
+        self.logger.app_logger.info(
+            f"Process starting. Next available ID: {current_id + 1}. "
+            f"Skipping {len(processed_paths)} historically completed files.")
 
         all_files = self._discover_files()
         total_files = len(all_files)
         self.logger.app_logger.info(f"Filesystem scan complete. Total files discovered: {total_files}")
 
-        self.logger.app_logger.info(f"Optimization: Applying {self.settings.JPEG_QUALITY}% JPEG quality and {self.settings.MAX_DIMENSION}px dimension limit to Batch #1")
+        self.logger.app_logger.info(
+            f"Optimization: Applying {self.settings.JPEG_QUALITY}% JPEG quality "
+            f"and {self.settings.MAX_DIMENSION}px dimension limit to Batch #1")
 
         if total_files == 0:
             self.logger.app_logger.warning("Input folder is empty. Ending process.")
-            if on_progress: on_progress({"type": "progress", "value": 100})
+            if on_progress:
+                on_progress({"type": "progress", "value": 100})
             return
 
         files_since_gc = 0
@@ -66,7 +72,8 @@ class BatchOrchestrator:
                     continue
 
                 next_id = current_id + 1
-                rel_path, ext, pipeline_name, generator, is_orphaned = self.router.evaluate_and_route(next_id, input_path, self.input_folder)
+                rel_path, ext, pipeline_name, generator, is_orphaned = \
+                    self.router.evaluate_and_route(next_id, input_path, self.input_folder)
 
                 current_id = next_id
                 self.db.handle_file_started(current_id, rel_path, ext, pipeline_name)
@@ -78,7 +85,9 @@ class BatchOrchestrator:
                 try:
                     while True:
                         if abort_flag and abort_flag.is_set():
-                            file_summary = FileSummary(0, "", Status.FAILURE.value, Status.FAILURE.value, "Aborted mid-extraction by user command.")
+                            file_summary = FileSummary(
+                                0, "", Status.FAILURE.value, Status.FAILURE.value,
+                                "Aborted mid-extraction by user command.")
                             break
 
                         page_result = next(generator)
@@ -104,11 +113,16 @@ class BatchOrchestrator:
                     valid_frames = self.db.get_successful_frame_paths(current_id, self.router.output_folder)
 
                     if not valid_frames:
-                        self.logger.app_logger.warning(f"[{current_id}] No valid frames to send to AI. Bypassing network call.")
-                        self.db.handle_llm_completed(current_id, "No images provided for network inference.", "No valid frames extracted.", Status.FAILURE.value)
+                        self.logger.app_logger.warning(
+                            f"[{current_id}] No valid frames to send to AI. Bypassing network call.")
+                        self.db.handle_llm_completed(
+                            current_id, "No images provided for network inference.",
+                            "No valid frames extracted.", Status.FAILURE.value)
                         self.logger.log_llm_completed(current_id, Status.FAILURE.value, "No valid frames extracted.")
                     else:
-                        self.logger.app_logger.info(f"[{current_id}] Extraction complete. Executing LLM Inference on {len(valid_frames)} frame(s)...")
+                        self.logger.app_logger.info(
+                            f"[{current_id}] Extraction complete. "
+                            f"Executing LLM Inference on {len(valid_frames)} frame(s)...")
 
                         inference = self.llm_client.execute_network_inference(valid_frames, abort_flag=abort_flag)
                         self.db.handle_llm_completed(current_id, inference.answer, inference.error, inference.status)
@@ -117,7 +131,9 @@ class BatchOrchestrator:
                         if inference.status == Status.LLM_FAILED.value:
                             consecutive_llm_failures += 1
                             if consecutive_llm_failures >= self.settings.MAX_CONSECUTIVE_LLM_FAILURES:
-                                abort_msg = f"CIRCUIT BREAKER TRIPPED: AI Server failed {self.settings.MAX_CONSECUTIVE_LLM_FAILURES} times in a row."
+                                abort_msg = (
+                                    f"CIRCUIT BREAKER TRIPPED: AI Server failed "
+                                    f"{self.settings.MAX_CONSECUTIVE_LLM_FAILURES} times in a row.")
                                 raise ConfigurationError(abort_msg)
                         else:
                             consecutive_llm_failures = 0
@@ -136,7 +152,9 @@ class BatchOrchestrator:
                 raise
 
             except Exception as loop_crash:
-                self.logger.log_critical_error("BatchOrchestrator", f"Unexpected runtime exception on {input_path.name}: {loop_crash}")
+                self.logger.log_critical_error(
+                    "BatchOrchestrator",
+                    f"Unexpected runtime exception on {input_path.name}: {loop_crash}")
 
                 if file_completed_in_db:
                     pass

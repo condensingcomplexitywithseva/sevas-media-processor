@@ -5,7 +5,7 @@ import logging
 import os
 import queue
 import sys
-from logging.handlers import MemoryHandler, RotatingFileHandler
+from logging.handlers import MemoryHandler
 from pathlib import Path
 
 import pytest
@@ -176,7 +176,6 @@ def test_werkzeug_access_lines_cannot_leak_the_session_token(clean_logging_state
 
 
 def test_setup_logging_survives_unwritable_logs_dir(clean_logging_state, monkeypatch):
-    tmp_path = clean_logging_state
 
     def exploding_handler(*args, **kwargs):
         raise OSError("locked")

@@ -11,7 +11,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from range_parsers import PageRangeSelector, VideoSelector
-from schemas import ConfigurationError, RangeStatus, Status
+from schemas import ConfigurationError, FileSummary, RangeStatus, Status
 from pipelines.base_pipeline import BaseMediaPipeline
 
 
@@ -105,7 +105,8 @@ def test_video_out_of_bounds_skipped():
 
 class _Dummy(BaseMediaPipeline):
     def process(self):
-        yield
+        yield from ()
+        return FileSummary(0, "", Status.OK.value, Status.OK.value, "")
 
 
 def _finalize(expected, ok, skipped, failed):

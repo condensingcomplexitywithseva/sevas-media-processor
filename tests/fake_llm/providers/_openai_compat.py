@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import random
 import string
-import time
-from typing import Any, Optional
+from typing import Any
 
 from ..content import estimate_tokens
 
@@ -19,7 +18,7 @@ def rand_suffix(n: int = 24, alphabet: str = string.ascii_letters + string.digit
 
 
 def oai_error(message: str, *, type: str = "invalid_request_error",
-              param: Optional[str] = None, code: Optional[str] = None,
+              param: str | None = None, code: str | None = None,
               drop_param: bool = False) -> dict:
     err: dict[str, Any] = {"message": message, "type": type}
     if not drop_param:
@@ -34,15 +33,15 @@ def chat_completion_body(
     text: str,
     *,
     prompt_text: str = "",
-    id: Optional[str] = None,
+    id: str | None = None,
     id_prefix: str = "chatcmpl-",
-    created: Optional[int] = None,
+    created: int | None = None,
     finish_reason: str = "stop",
     reasoning_tokens: int = 0,
-    system_fingerprint: Optional[str] = None,
+    system_fingerprint: str | None = None,
     include_usage_details: bool = True,
-    message_extra: Optional[dict] = None,
-    usage_extra: Optional[dict] = None,
+    message_extra: dict | None = None,
+    usage_extra: dict | None = None,
     refusal: Any = None,
 ) -> dict:
     prompt_tokens = estimate_tokens(prompt_text) or 16
@@ -107,16 +106,16 @@ def chat_completion_sse_events(
     model: str,
     text: str,
     *,
-    id: Optional[str] = None,
+    id: str | None = None,
     id_prefix: str = "chatcmpl-",
-    created: Optional[int] = None,
-    system_fingerprint: Optional[str] = None,
+    created: int | None = None,
+    system_fingerprint: str | None = None,
     finish_reason: str = "stop",
     include_usage: bool = False,
     prompt_text: str = "",
     reasoning_tokens: int = 0,
     done: bool = True,
-    delta_extra_first: Optional[dict] = None,
+    delta_extra_first: dict | None = None,
 ) -> list[str]:
     import json as _json
 

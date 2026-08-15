@@ -108,9 +108,9 @@ def _fs_call_sites(text: str):
 _ALLOWED_PLAIN = {
     "main.py": {
         'if not (locales_dir / target_json).exists():',
-        'with open(locales_dir / target_json, "r", encoding="utf-8") as f:',
+        'with open(locales_dir / target_json, encoding="utf-8") as f:',
         'if settings_file.exists():',
-        'with open(settings_file, "r", encoding="utf-8") as sf:',
+        'with open(settings_file, encoding="utf-8") as sf:',
         'return "data:image/png;base64," + base64.b64encode(icon_png.read_bytes()).decode("ascii")',
         'panic_log_path = ( desktop_path if desktop_path.parent.exists()',
     },
@@ -124,7 +124,7 @@ _ALLOWED_PLAIN = {
     },
     "routes\\settings_api.py": {
         'if not file_path.exists():',
-        'with open(file_path, "r", encoding="utf-8") as f:',
+        'with open(file_path, encoding="utf-8") as f:',
         'if not target_path.exists():',
         'if active_path.exists():',
         'os.replace(active_path, backup_path)',
@@ -209,7 +209,7 @@ def test_a_jpeg_written_past_260_chars_reaches_the_llm_encoder(tmp_path):
     status, _comment = converter.process_image(Image.new("RGB", (8, 8), "red"), output_path)
     assert status == Status.OK.value
 
-    encoded = LLMClient._encode_image_to_base64(object(), output_path)
+    encoded = LLMClient._encode_image_to_base64(object(), output_path)  # pyright: ignore[reportArgumentType]
     assert base64.b64decode(encoded)[:2] == b"\xff\xd8", "not the JPEG the converter wrote"
 
 
@@ -304,7 +304,7 @@ def test_the_shell_rename_refuses_overlong_paths_readably(tmp_path):
         windows_shell.rename_folder_like_explorer(source, target)
 
     assert raised.value.winerror == 0x7C
-    assert "too long" in raised.value.strerror
+    assert raised.value.strerror is not None and "too long" in raised.value.strerror
     assert raised.value.filename == str(source)
     assert raised.value.filename2 == str(target)
     assert source.exists(), "a refusal must leave the source untouched"

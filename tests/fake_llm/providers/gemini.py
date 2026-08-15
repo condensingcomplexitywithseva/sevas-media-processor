@@ -334,7 +334,7 @@ class GeminiServer(ProviderServer):
 
 
     def list_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._native_auth_error()
@@ -409,7 +409,7 @@ class GeminiServer(ProviderServer):
             model, text, prompt_text=prompt_text))
 
     def oai_list_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._oai_auth_error()

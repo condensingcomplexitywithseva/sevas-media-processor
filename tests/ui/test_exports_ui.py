@@ -18,8 +18,12 @@ def _toast(page):
     )
 
 
-def _toast_visible(toast):
-    return toast is not None and float(toast["opacity"]) > 0.5
+def _wait_for_toast(page):
+    page.wait_for_function(
+        "() => { const t = document.getElementById('generic-toast');"
+        " return !!t && getComputedStyle(t).opacity === '1'; }"
+    )
+    return _toast(page)
 
 
 def test_export_logs_button_writes_the_file_and_names_it_in_a_toast(
@@ -44,8 +48,7 @@ def test_export_logs_button_writes_the_file_and_names_it_in_a_toast(
     assert exported.exists(), "the export button did not produce the file"
     assert exported.read_text(encoding="utf-8") == "session lines\n"
 
-    toast = _toast(page)
-    assert _toast_visible(toast), "no toast appeared"
+    toast = _wait_for_toast(page)
     assert str(exported) in toast["text"], toast["text"]
     assert "error-color" not in toast["background"]
 
@@ -83,8 +86,7 @@ def test_all_logs_button_reports_an_open_failure_honestly(open_page, tmp_path):
     page.click("button:has(span[data-i18n='btn_all_logs_folder'])")
     page.wait_for_timeout(400)
 
-    toast = _toast(page)
-    assert _toast_visible(toast), "no toast appeared"
+    toast = _wait_for_toast(page)
     assert "Could not open the folder" in toast["text"], toast["text"]
     assert "error-color" in toast["background"]
 
@@ -95,8 +97,7 @@ def test_export_logs_failure_surfaces_as_a_red_toast(open_page):
     page.click("button:has(span[data-i18n='btn_export_log'])")
     page.wait_for_timeout(400)
 
-    toast = _toast(page)
-    assert _toast_visible(toast), "no toast appeared"
+    toast = _wait_for_toast(page)
     assert "No system log found." in toast["text"], toast["text"]
     assert "error-color" in toast["background"]
 

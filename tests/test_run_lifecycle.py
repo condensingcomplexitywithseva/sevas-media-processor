@@ -5,6 +5,8 @@ import sys
 import threading
 from pathlib import Path
 
+from typing import Any
+
 import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -22,13 +24,13 @@ from schemas import ConfigurationError
 def make_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(central_logger, "setup_logging", lambda *a, **k: None)
 
-    def build(**overrides):
+    def build(**overrides) -> Settings:
         (tmp_path / "input").mkdir(exist_ok=True)
-        values = dict(
-            INPUT_FOLDER_PATH=str(tmp_path / "input"),
-            OUTPUT_FOLDER_PATH=str(tmp_path / "output"),
-            ENABLE_LLM_INFERENCE=False,
-        )
+        values: dict[str, Any] = {
+            "INPUT_FOLDER_PATH": str(tmp_path / "input"),
+            "OUTPUT_FOLDER_PATH": str(tmp_path / "output"),
+            "ENABLE_LLM_INFERENCE": False,
+        }
         values.update(overrides)
         return Settings(**values)
 

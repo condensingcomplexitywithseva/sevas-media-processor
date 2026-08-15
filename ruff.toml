@@ -1,0 +1,19 @@
+
+line-length = 120
+target-version = "py310"
+
+[lint]
+select = ["E", "W", "F", "B", "S", "UP", "C4", "SIM", "RUF"]
+ignore = [
+    "S603",
+    "S110",
+    "SIM108",
+    "S101",
+]
+
+allowed-confusables = ["е", "р", "о", "с", "К", "Н", "а", "х", "у", "и", "т", "н", "к", "м", "в", "С", "Е", "О", "Т", "М", "А", "В"]
+
+[lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311", "E402"]
+"tests/test_fake_llm_client_integration.py" = ["F811"]
+"tests/test_llm_client_cruelty.py" = ["F811"]

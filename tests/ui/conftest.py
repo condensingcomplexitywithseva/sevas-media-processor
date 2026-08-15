@@ -1,6 +1,7 @@
 # Copyright 2026 Vsevolod Belonogov
 # SPDX-License-Identifier: Apache-2.0
 
+import contextlib
 import json
 import logging
 import os
@@ -120,13 +121,11 @@ def open_page(browser, app_server):
             from routes.web_server import SESSION_TOKEN
 
             def deliver_api_token(*_):
-                try:
+                with contextlib.suppress(Exception):
                     page.evaluate(
                         "token => window.__receiveApiToken && window.__receiveApiToken(token)",
                         SESSION_TOKEN,
                     )
-                except Exception:
-                    pass
 
             page.on("load", deliver_api_token)
             deliver_api_token()

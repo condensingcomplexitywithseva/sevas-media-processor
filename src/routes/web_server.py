@@ -8,7 +8,8 @@ from routes.settings_api import api_blueprint
 from routes.execution_api import execution_bp
 from routes.export_api import exports_bp
 from routes.about_api import about_bp
-from config_loader import Settings, ROOT_DIR, get_env_file_path, get_masked_env_tokens, get_app_data_dir, get_settings_path
+from config_loader import (Settings, ROOT_DIR, get_env_file_path, get_masked_env_tokens,
+                           get_app_data_dir, get_settings_path)
 from config_validator import ProviderConfig
 from version import APP_VERSION, APP_LINKS
 
@@ -54,7 +55,7 @@ def get_translations():
         for filepath in locales_dir.glob("*.json"):
             lang = filepath.stem
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     translations[lang] = json.load(f)
             except Exception:
                 translations[lang] = {}

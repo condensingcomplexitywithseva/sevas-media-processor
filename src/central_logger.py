@@ -13,6 +13,7 @@ import queue
 from schemas import Status, PageResult, FileSummary
 from fs_utils import humanize_paths
 from config_loader import get_app_data_dir
+import contextlib
 
 VALID_LOG_LEVELS = {
     "DEBUG": logging.DEBUG,
@@ -66,13 +67,18 @@ class SystemLogger:
         elif page_result.success == Status.SKIPPED.value:
             self.app_logger.debug(f"[{unique_file_id}] Frame {page_result.page_number} SKIPPED: {page_result.comment}")
         else:
-            self.app_logger.debug(f"[{unique_file_id}] Frame {page_result.page_number} SAVED: {page_result.output_filename}")
+            self.app_logger.debug(
+                f"[{unique_file_id}] Frame {page_result.page_number} SAVED: "
+                f"{page_result.output_filename}")
 
     def log_file_completed(self, unique_file_id: int, file_summary: FileSummary) -> None:
         if file_summary.final_aggregate_status == Status.OK.value:
             self.app_logger.info(f"[{unique_file_id}] COMPLETED SUCCESSFULLY: {file_summary.final_aggregate_comment}")
         else:
-            self.app_logger.warning(f"[{unique_file_id}] COMPLETED WITH ISSUES ({file_summary.final_aggregate_status.upper()}): {file_summary.final_aggregate_comment}")
+            self.app_logger.warning(
+                f"[{unique_file_id}] COMPLETED WITH ISSUES "
+                f"({file_summary.final_aggregate_status.upper()}): "
+                f"{file_summary.final_aggregate_comment}")
 
     def log_llm_completed(self, unique_file_id: int, status_override: str, llm_error: str) -> None:
         if status_override == Status.LLM_FAILED.value:
@@ -112,10 +118,8 @@ class SSEBroadcaster:
                 self.history.append(event)
             listeners_copy = list(self.listeners)
         for q in listeners_copy:
-            try:
+            with contextlib.suppress(queue.Full):
                 q.put_nowait(event)
-            except queue.Full:
-                pass
 
 
 global_broadcaster = SSEBroadcaster()
@@ -184,7 +188,8 @@ def setup_logging(log_level, memory_buffer_handler=None) -> None:
         file_formatter = SystemLogFormatter("%(asctime)s - [%(category)s] - %(levelname)s - %(message)s")
         _active_file_handler = None
         try:
-            file_handler = RotatingFileHandler(log_file_path, maxBytes=20 * 1024 * 1024, backupCount=5, encoding="utf-8")
+            file_handler = RotatingFileHandler(
+                log_file_path, maxBytes=20 * 1024 * 1024, backupCount=5, encoding="utf-8")
             file_handler.setFormatter(file_formatter)
             _active_file_handler = file_handler
 
@@ -192,14 +197,14 @@ def setup_logging(log_level, memory_buffer_handler=None) -> None:
                 f.write(f"\n=== APPLICATION LAUNCHED AT {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
         except OSError as file_lock_error:
-            logging.getLogger("SevasMediaProcessor").critical(f"Failed to setup persistent logging in AppData. Running console-only. Error: {file_lock_error}")
+            logging.getLogger("SevasMediaProcessor").critical(
+                f"Failed to setup persistent logging in AppData. "
+                f"Running console-only. Error: {file_lock_error}")
 
         if memory_buffer_handler:
             for record in list(memory_buffer_handler.buffer):
-                try:
+                with contextlib.suppress(Exception):
                     global_sse_handler.handle(record)
-                except Exception:
-                    pass
 
             if _active_file_handler:
                 memory_buffer_handler.setTarget(_active_file_handler)
@@ -233,9 +238,7 @@ def get_active_log_file():
 def close_logging() -> None:
     global _active_file_handler
     if _active_file_handler:
-        try:
+        with contextlib.suppress(Exception):
             _active_file_handler.close()
-        except Exception:
-            pass
         logging.getLogger().removeHandler(_active_file_handler)
         _active_file_handler = None

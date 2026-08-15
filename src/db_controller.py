@@ -37,11 +37,13 @@ class SQLiteDatabaseController:
 
     def get_highest_file_id(self) -> int:
         with Session(self.sql_engine) as active_session:
-            statement = select(DatabaseFileRegistry.unique_file_id).order_by(col(DatabaseFileRegistry.unique_file_id).desc())
+            statement = select(DatabaseFileRegistry.unique_file_id).order_by(
+                col(DatabaseFileRegistry.unique_file_id).desc())
             highest_id = active_session.exec(statement).first()
             return highest_id if highest_id is not None else 0
 
-    def handle_file_started(self, unique_file_id: int, relative_file_path: str, detected_extension: str, pipeline_name: str) -> None:
+    def handle_file_started(self, unique_file_id: int, relative_file_path: str,
+                            detected_extension: str, pipeline_name: str) -> None:
         with Session(self.sql_engine) as active_session:
             new_registry_entry = DatabaseFileRegistry(
                 unique_file_id=unique_file_id,
@@ -83,7 +85,8 @@ class SQLiteDatabaseController:
                 active_session.commit()
             else:
                 database_logger.warning(
-                    f"handle_file_completed: no registry record found for file ID {unique_file_id}; completion not recorded."
+                    f"handle_file_completed: no registry record found for "
+                    f"file ID {unique_file_id}; completion not recorded."
                 )
 
     def handle_llm_completed(self, unique_file_id: int, answer: str, error: str, status_override: str) -> None:
@@ -100,7 +103,8 @@ class SQLiteDatabaseController:
                 active_session.commit()
             else:
                 database_logger.warning(
-                    f"handle_llm_completed: no registry record found for file ID {unique_file_id}; AI result not recorded."
+                    f"handle_llm_completed: no registry record found for "
+                    f"file ID {unique_file_id}; AI result not recorded."
                 )
 
     def get_successfully_processed_relative_paths(self, no_retry_statuses: list[str]) -> set[str]:

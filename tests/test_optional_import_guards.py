@@ -55,6 +55,7 @@ def guarded_external_imports(tree):
             elif isinstance(stmt, ast.ImportFrom):
                 if stmt.level:
                     continue
+                assert stmt.module is not None
                 found.setdefault(stmt.module.split(".")[0], []).append(stmt)
     return {
         name: stmts
@@ -102,7 +103,7 @@ def test_guarded_imports_of_pinned_library_resolve(library):
             ast.fix_missing_locations(module)
             spelling = ast.unparse(stmt)
             try:
-                exec(compile(module, f"<guard in {relpath}>", "exec"), {})
+                exec(compile(module, f"<guard in {relpath}>", "exec"), {})  # noqa: S102
             except Exception as e:
                 pytest.fail(
                     f"'{spelling}' (guarded in {relpath}) does not resolve: "

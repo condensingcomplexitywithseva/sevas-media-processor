@@ -3,10 +3,9 @@
 
 
 from sqlmodel import SQLModel, Field
-from typing import Optional
 
 class DatabaseFileRegistry(SQLModel, table=True):
-    unique_file_id: Optional[int] = Field(default=None, primary_key=True)
+    unique_file_id: int | None = Field(default=None, primary_key=True)
 
     relative_file_path: str = Field(index=True)
 
@@ -22,15 +21,15 @@ class DatabaseFileRegistry(SQLModel, table=True):
 
     range_status_code: str = Field(default="")
 
-    llm_network_answer: Optional[str] = Field(default="")
+    llm_network_answer: str | None = Field(default="")
 
-    llm_network_error: Optional[str] = Field(default="")
+    llm_network_error: str | None = Field(default="")
 
     llm_answer_json: str = Field(default="")
 
 
 class DatabasePageLog(SQLModel, table=True):
-    primary_database_id: Optional[int] = Field(default=None, primary_key=True)
+    primary_database_id: int | None = Field(default=None, primary_key=True)
 
     parent_file_id: int = Field(foreign_key="databasefileregistry.unique_file_id", index=True)
 

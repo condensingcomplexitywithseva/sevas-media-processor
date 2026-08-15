@@ -4,13 +4,14 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 import numpy as np
 import io
 import os
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 from schemas import Status
 from fs_utils import get_safe_path
+import contextlib
 
 logger = logging.getLogger("ImageConverter")
 
@@ -23,18 +24,18 @@ def _lazy_load_image_plugins():
     try:
         from pillow_heif import register_heif_opener
         register_heif_opener()
-        import pillow_avif
+        import pillow_avif  # noqa: F401  (the import itself registers AVIF)
     except ImportError as e:
         logger.warning(
             f"Modern image plugins missing. HEIC/AVIF files will fail: {e}"
         )
     except Exception as e:
         logger.warning(
-            f"Unexpected register_heif_opener import failure: {str(e)}"
+            f"Unexpected register_heif_opener import failure: {e!s}"
         )
     except BaseException as e:
         logger.warning(
-            f"Caught base exception during plugin import (e.g. KeyboardInterrupt from VS Code): {str(e)}"
+            f"Caught base exception during plugin import (e.g. KeyboardInterrupt from VS Code): {e!s}"
         )
     finally:
         _PLUGINS_LOADED = True
@@ -45,7 +46,7 @@ SUPPORTED_OPEN_FORMATS = (
 )
 
 
-def open_supported_image(path: Path) -> Image.Image:
+def open_supported_image(path: str | Path) -> Image.Image:
     _lazy_load_image_plugins()
     Image.init()
     return Image.open(
@@ -89,7 +90,7 @@ class ToJpegConverter:
         max_dimension: int,
         max_file_size_kb: int,
         lowest_quality: int,
-        white_background: Tuple[int, int, int],
+        white_background: tuple[int, int, int],
     ):
         _lazy_load_image_plugins()
         self.target_quality = jpeg_quality
@@ -100,7 +101,7 @@ class ToJpegConverter:
 
     def process_image(
         self, image: Any, output_path: Path
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
 
         if image is None or not isinstance(image, Image.Image):
             return Status.FAILURE.value, "Input was not a valid PIL Image."
@@ -157,7 +158,7 @@ class ToJpegConverter:
                     current = transposed
             except Exception as e:
                 msg = (
-                    f"Non-fatal error: EXIF Rotation bypassed: {str(e)}"
+                    f"Non-fatal error: EXIF Rotation bypassed: {e!s}"
                 )
                 logger.warning(
                     f"[{output_path.name}] - {msg}", exc_info=True
@@ -267,18 +268,16 @@ class ToJpegConverter:
         except UnidentifiedImageError:
             return Status.FAILURE.value, "File format unrecognizable by Pillow decoding engine."
         except OSError as e:
-            return Status.FAILURE.value, f"OS/Disk save error: {str(e)}"
+            return Status.FAILURE.value, f"OS/Disk save error: {e!s}"
         except Exception as e:
             return (
                 Status.FAILURE.value,
-                f"Unexpected fatal image error: {str(e)}",
+                f"Unexpected fatal image error: {e!s}",
             )
         finally:
             for temp_img in temp_images:
-                try:
+                with contextlib.suppress(Exception):
                     temp_img.close()
-                except Exception:
-                    pass
 
     def _bake_wide_gamut_to_srgb(
         self, image: Image.Image, output_path: Path, warnings: list
@@ -300,10 +299,10 @@ class ToJpegConverter:
             logger.debug(
                 f"[{output_path.name}] - Converted '{description.strip()}' to sRGB."
             )
-            return converted
+            return image if converted is None else converted
         except Exception as e:
             msg = "Embedded color profile could not be applied; colors may shift."
-            logger.warning(f"[{output_path.name}] - {msg} ({str(e)})")
+            logger.warning(f"[{output_path.name}] - {msg} ({e!s})")
             warnings.append(msg)
             return image
 
@@ -325,7 +324,7 @@ class ToJpegConverter:
             except (MemoryError, Exception) as e:
                 raise ValueError(
                     f"RAM exhaustion or render crash during RGBA flattening: {e}"
-                )
+                ) from e
             finally:
                 rgba.close()
 
@@ -334,4 +333,4 @@ class ToJpegConverter:
         except Exception as e:
             msg = f"Irreparable color space conversion failure for mode '{image.mode}': {e}"
             logger.error(msg)
-            raise ValueError(msg)
+            raise ValueError(msg) from e

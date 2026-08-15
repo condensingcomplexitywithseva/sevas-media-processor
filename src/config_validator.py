@@ -4,13 +4,14 @@
 
 import os
 from pathlib import Path
-from typing import Tuple, List, Dict, Any, Literal
-from pydantic import BaseModel, Field, TypeAdapter, create_model, field_validator
+from typing import Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, field_validator
 from pydantic.fields import FieldInfo
-from pydantic.fields import PydanticUndefined
+from pydantic_core import PydanticUndefined
 from schemas import Status
 from range_parsers import PageRangeSelector, VideoSelector
 from fs_utils import read_prompt, get_safe_path
+import contextlib
 
 def current_run_folder(output_folder_path) -> Path:
     return Path(str(output_folder_path)) / "current_run"
@@ -35,7 +36,7 @@ class ProviderConfig(BaseModel):
     reasoning_handling: Literal["preserve", "strip_xml", "parse_claude_blocks", "ignore_api_field"] = "preserve"
     response_extraction_path: str = "choices[0].message.content"
 
-def _default_provider_configs() -> Dict[str, ProviderConfig]:
+def _default_provider_configs() -> dict[str, ProviderConfig]:
     return {
         "openai": ProviderConfig(
             url="https://api.openai.com/v1/chat/completions",
@@ -94,24 +95,35 @@ def _default_provider_configs() -> Dict[str, ProviderConfig]:
 
 class Settings(BaseModel):
 
+    model_config = ConfigDict(validate_default=True)
+
     GUI_LANGUAGE: str = Field(default="en", json_schema_extra={'tab': 'general'})
-    INPUT_FOLDER_PATH: Path = Field(default="input", json_schema_extra={'tab': 'general'})
-    OUTPUT_FOLDER_PATH: Path = Field(default="output", json_schema_extra={'tab': 'general'})
-    LOGGING_LEVEL: str = Field(default="DEBUG", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$", json_schema_extra={'tab': 'general'})
+    INPUT_FOLDER_PATH: Path = Field(default_factory=lambda: Path("input"),
+                                    json_schema_extra={'tab': 'general'})
+    OUTPUT_FOLDER_PATH: Path = Field(default_factory=lambda: Path("output"),
+                                     json_schema_extra={'tab': 'general'})
+    LOGGING_LEVEL: str = Field(default="DEBUG", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$",
+                               json_schema_extra={'tab': 'general'})
     START_OVER: bool = Field(default=True, json_schema_extra={'tab': 'general'})
-    NO_RETRY_STATUSES: List[Status] = Field(default=[Status.OK], json_schema_extra={'tab': 'general'})
+    NO_RETRY_STATUSES: list[Status] = Field(default=[Status.OK], json_schema_extra={'tab': 'general'})
 
     ENABLE_LLM_INFERENCE: bool = Field(default=False, json_schema_extra={'tab': 'general'})
-    LLM_PROVIDER: str = Field(default="openai", pattern="^(openai|claude|gemini|deepseek|mistral|ollama|lm-studio|custom)$", json_schema_extra={'tab': 'ai'})
+    LLM_PROVIDER: str = Field(default="openai",
+                              pattern="^(openai|claude|gemini|deepseek|mistral|ollama|lm-studio|custom)$",
+                              json_schema_extra={'tab': 'ai'})
 
-    LLM_PROVIDERS: Dict[str, Any] = Field(
+    LLM_PROVIDERS: dict[str, Any] = Field(
         default_factory=lambda: {k: v.model_dump() for k, v in _default_provider_configs().items()},
         json_schema_extra={'tab': 'ai'},
     )
 
-    LLM_USER_PROMPT: str = Field(default="Please accurately extract and transcribe all text from these images.", min_length=1, json_schema_extra={'tab': 'ai'})
+    LLM_USER_PROMPT: str = Field(
+        default="Please accurately extract and transcribe all text from these images.",
+        min_length=1, json_schema_extra={'tab': 'ai'})
     LLM_USER_PROMPT_MODE: str = Field(default="TEXT", pattern="^(TEXT|FILE)$", json_schema_extra={'tab': 'ai'})
-    LLM_SYSTEM_PROMPT: str = Field(default="You are a helpful AI assistant. Output only the requested text.", min_length=1, json_schema_extra={'tab': 'ai'})
+    LLM_SYSTEM_PROMPT: str = Field(
+        default="You are a helpful AI assistant. Output only the requested text.",
+        min_length=1, json_schema_extra={'tab': 'ai'})
     LLM_SYSTEM_PROMPT_MODE: str = Field(default="TEXT", pattern="^(TEXT|FILE)$", json_schema_extra={'tab': 'ai'})
 
     MAX_JPEGS_PER_INFERENCE: int = Field(default=10, ge=1, json_schema_extra={'tab': 'ai'})
@@ -120,7 +132,7 @@ class Settings(BaseModel):
     LLM_MAX_RETRIES: int = Field(default=3, ge=1, json_schema_extra={'tab': 'ai'})
     LLM_TIMEOUT_SECONDS: int = Field(default=1200, ge=1, json_schema_extra={'tab': 'ai'})
     LLM_RETRY_SLEEP_SECONDS: int = Field(default=3, ge=0, json_schema_extra={'tab': 'ai'})
-    ENV_TOKENS: Dict[str, str] = Field(default_factory=dict, exclude=True, json_schema_extra={'tab': 'ai'})
+    ENV_TOKENS: dict[str, str] = Field(default_factory=dict, exclude=True, json_schema_extra={'tab': 'ai'})
 
     MAX_DIMENSION: int = Field(default=2560, ge=1, json_schema_extra={'tab': 'output'})
     JPEG_QUALITY: int = Field(default=90, ge=1, le=100, json_schema_extra={'tab': 'output'})
@@ -129,7 +141,7 @@ class Settings(BaseModel):
     LOWEST_QUALITY: int = Field(default=20, ge=1, le=100, json_schema_extra={'tab': 'output'})
     PILLOW_MAX_PIXELS: int = Field(default=89478485, ge=1, json_schema_extra={'tab': 'output'})
 
-    WHITE_BACKGROUND: Tuple[int, int, int] = Field(default=(255, 255, 255), json_schema_extra={'tab': 'output'})
+    WHITE_BACKGROUND: tuple[int, int, int] = Field(default=(255, 255, 255), json_schema_extra={'tab': 'output'})
 
     OUTPUT_FILENAME_PREFIX_LENGTH: int = Field(default=20, ge=0, le=64, json_schema_extra={'tab': 'output'})
     OUTPUT_FILENAME_TIMESTAMPS: bool = Field(default=True, json_schema_extra={'tab': 'output'})
@@ -179,15 +191,13 @@ class Settings(BaseModel):
                 complete[key] = entry
         for key, entry in complete.items():
             if isinstance(entry, dict):
-                try:
+                with contextlib.suppress(Exception):
                     complete[key] = ProviderConfig(**entry).model_dump()
-                except Exception:
-                    pass
         return complete
 
     @field_validator("NO_RETRY_STATUSES", mode="before")
     @classmethod
-    def parse_no_retry_statuses(cls, value: Any) -> List[Status]:
+    def parse_no_retry_statuses(cls, value: Any) -> list[Status]:
         if isinstance(value, str):
             return [Status(v.strip()) for v in value.split(",") if v.strip()]
         if isinstance(value, list):
@@ -196,13 +206,14 @@ class Settings(BaseModel):
 
     @field_validator("WHITE_BACKGROUND", mode="before")
     @classmethod
-    def parse_white_background(cls, value: Any) -> Tuple[int, int, int]:
+    def parse_white_background(cls, value: Any) -> tuple[int, int, int]:
         if isinstance(value, str):
             try:
                 parts = tuple(map(int, value.split(",")))
                 if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
                     return parts
-            except Exception: pass
+            except Exception:
+                pass
             raise ValueError("err_white_bg_format")
         if isinstance(value, (tuple, list)) and len(value) == 3:
             if all(isinstance(p, int) and 0 <= p <= 255 for p in value):
@@ -223,8 +234,8 @@ class Settings(BaseModel):
     def validate_page_ranges(cls, value: str) -> str:
         try:
             PageRangeSelector(value)
-        except Exception:
-            raise ValueError("err_invalid_range")
+        except Exception as error:
+            raise ValueError("err_invalid_range") from error
         return value
 
     @field_validator("VIDEO_RANGE")
@@ -232,8 +243,8 @@ class Settings(BaseModel):
     def validate_video_range(cls, value: str) -> str:
         try:
             VideoSelector(value)
-        except Exception:
-            raise ValueError("err_invalid_time_range")
+        except Exception as error:
+            raise ValueError("err_invalid_time_range") from error
         return value
 
     def apply_library_limits(self):
@@ -248,7 +259,7 @@ class Settings(BaseModel):
 
 AI_TAB_FIELDS = frozenset(
     name for name, f in Settings.model_fields.items()
-    if (f.json_schema_extra or {}).get("tab") == "ai"
+    if isinstance(f.json_schema_extra, dict) and f.json_schema_extra.get("tab") == "ai"
 )
 
 
@@ -261,10 +272,13 @@ def _carrier_field(original: FieldInfo):
     return Field(**kwargs)
 
 
+_carrier_fields: dict[str, Any] = {
+    name: (Any, _carrier_field(Settings.model_fields[name])) for name in AI_TAB_FIELDS
+}
 SettingsAIDormant = create_model(
     "SettingsAIDormant",
     __base__=Settings,
-    **{name: (Any, _carrier_field(Settings.model_fields[name])) for name in AI_TAB_FIELDS},
+    **_carrier_fields,
 )
 
 
@@ -276,8 +290,8 @@ def resolve_ai_enabled(raw_value: Any) -> bool:
 
 
 def validate_business_rules(
-    settings: Dict[str, Any], env_tokens: Dict[str, str], ai_enabled: bool
-) -> List[Tuple[str, str]]:
+    settings: dict[str, Any], env_tokens: dict[str, str], ai_enabled: bool
+) -> list[tuple[str, str]]:
     errors = []
 
     input_raw = str(settings.get("INPUT_FOLDER_PATH") or "")
@@ -298,7 +312,8 @@ def validate_business_rules(
     input_check = Path(os.path.normcase(str(input_path)))
     output_check = Path(os.path.normcase(str(output_path)))
 
-    if input_check == output_check or output_check.is_relative_to(input_check) or input_check.is_relative_to(output_check):
+    if (input_check == output_check or output_check.is_relative_to(input_check)
+            or input_check.is_relative_to(output_check)):
         errors.append(("OUTPUT_FOLDER_PATH", "err_path_overlap"))
         errors.append(("INPUT_FOLDER_PATH", "err_path_overlap"))
 

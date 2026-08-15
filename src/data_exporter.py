@@ -8,7 +8,7 @@ import time
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 from sqlmodel import Session, create_engine, select, col
 
 from db_schema import DatabaseFileRegistry, DatabasePageLog
@@ -37,7 +37,8 @@ class SQLiteDataExporter:
         except Exception:
             exporter_logger.warning("Could not cleanly dispose the export database engine.")
 
-    def _execute_with_lock_protection(self, export_function: Callable[[], None], target_file_name: str, output_dir: Path) -> None:
+    def _execute_with_lock_protection(self, export_function: Callable[[], None],
+                                      target_file_name: str, output_dir: Path) -> None:
         panic_path = output_dir / f"_LOCKED_ERROR_{target_file_name}.txt"
 
         for attempt in range(self.max_retries):
@@ -70,7 +71,8 @@ class SQLiteDataExporter:
                         time.sleep(10)
 
                 else:
-                    fatal_msg = f"CRITICAL: Exhausted all retries. Cannot access {target_file_name}. Details: {os_error}"
+                    fatal_msg = (f"CRITICAL: Exhausted all retries. "
+                                 f"Cannot access {target_file_name}. Details: {os_error}")
                     exporter_logger.critical(fatal_msg)
                     raise PermissionError(fatal_msg) from os_error
 

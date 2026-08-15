@@ -8,7 +8,9 @@ import subprocess
 import logging
 from pathlib import Path
 from flask import Blueprint, request, jsonify
-from config_loader import Settings, ROOT_DIR, get_masked_env_tokens, get_settings_path, update_env_tokens, load_for_ui, validate_draft, save_settings, log_settings_errors, real_token_updates, is_broken_file
+from config_loader import (Settings, ROOT_DIR, get_masked_env_tokens, get_settings_path,
+                           update_env_tokens, load_for_ui, validate_draft, save_settings,
+                           log_settings_errors, real_token_updates, is_broken_file)
 from fs_utils import get_safe_path, text_looks_binary
 
 api_blueprint = Blueprint('api', __name__)
@@ -36,7 +38,8 @@ def commit_settings():
 
     _, current_errors = load_for_ui()
     if is_broken_file(current_errors):
-        logger.warning("Synchronization ABORTED: The settings.json file on disk is corrupted. Cannot safely commit UI changes.")
+        logger.warning("Synchronization ABORTED: The settings.json file on disk "
+                       "is corrupted. Cannot safely commit UI changes.")
         return jsonify({"status": "error", "errors": current_errors}), 400
 
     payload = unflatten_dict(request.json)
@@ -51,6 +54,7 @@ def commit_settings():
 
         logger.info("Validation SUCCESS. Committing changes to settings.json.")
 
+        assert settings_obj is not None
         save_settings(settings_obj)
 
         env_updates = real_token_updates(payload.get("ENV_TOKENS"))
@@ -82,7 +86,7 @@ def wipe_token():
     logger.info(f"Wiping token for provider: {provider}")
     update_env_tokens({provider: ""})
 
-    merged, errors = load_for_ui()
+    _merged, errors = load_for_ui()
     if errors:
         log_settings_errors(errors)
 
@@ -94,7 +98,7 @@ def wipe_token():
 
 
 def _notepad_path() -> str:
-    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+    return os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"),
                         "System32", "notepad.exe")
 
 
@@ -169,7 +173,7 @@ def get_locale(lang):
         return jsonify({"error": "Locale not found"}), 404
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             return jsonify(json.load(f))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -193,7 +197,7 @@ def preview_file():
 
     try:
         lines = []
-        with open(safe_path, "r", encoding="utf-8") as f:
+        with open(safe_path, encoding="utf-8") as f:
             for _ in range(10):
                 line = f.readline(8192)
                 if not line:

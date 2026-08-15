@@ -100,8 +100,8 @@ def test_abort_mid_batch_emits_aborted_event_and_keeps_partial_db(tmp_path, monk
         (input_dir / f"file_{i}.png").write_bytes(b"x")
 
     settings = Settings(
-        INPUT_FOLDER_PATH=str(input_dir),
-        OUTPUT_FOLDER_PATH=str(tmp_path / "output"),
+        INPUT_FOLDER_PATH=input_dir,
+        OUTPUT_FOLDER_PATH=tmp_path / "output",
         ENABLE_LLM_INFERENCE=False,
     )
 

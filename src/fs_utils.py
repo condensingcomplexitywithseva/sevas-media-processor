@@ -100,7 +100,7 @@ def text_looks_binary(text: str) -> bool:
 
 def read_prompt(value: str, mode: str) -> str:
     if mode == "FILE" and value.strip():
-        with open(get_safe_path(Path(value)), "r", encoding="utf-8") as f:
+        with open(get_safe_path(Path(value)), encoding="utf-8") as f:
             content = f.read()
         if text_looks_binary(content):
             raise ValueError(f"prompt file is not text (control characters): {value}")

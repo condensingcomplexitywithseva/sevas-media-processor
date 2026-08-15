@@ -4,10 +4,16 @@
 
 import logging
 from pathlib import Path
-from typing import Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 if TYPE_CHECKING:
     from range_parsers import PageRangeSelector
+
+from fs_utils import get_safe_path
+from schemas import Status, RangeStatus, PageResult, FileSummary
+from pipelines.base_pipeline import BaseMediaPipeline
+from to_jpeg_converter import ToJpegConverter
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +25,6 @@ except ImportError as err:
 except Exception as unk_err:
     pdfium = None
     pdf_err = str(unk_err)
-
-from fs_utils import get_safe_path
-from schemas import Status, RangeStatus, PageResult, FileSummary
-from pipelines.base_pipeline import BaseMediaPipeline
-from to_jpeg_converter import ToJpegConverter
 
 
 class DocumentPipeline(BaseMediaPipeline):
@@ -75,7 +76,8 @@ class DocumentPipeline(BaseMediaPipeline):
 
                 if len(indices) > max_pages:
                     logger.warning(
-                        f"Memory Cap Reached: Truncating {self.relative_path} from {len(indices)} requested pages down to {max_pages}."
+                        f"Memory Cap Reached: Truncating {self.relative_path} from "
+                        f"{len(indices)} requested pages down to {max_pages}."
                     )
                     indices = indices[:max_pages]
                     if range_status == RangeStatus.OK.value:
@@ -87,7 +89,7 @@ class DocumentPipeline(BaseMediaPipeline):
                     logger.info(f"Skipping {self.relative_path}: Range out of bounds.")
                     return self.finalize_results(
                         0, 0, 0, 0, total_pages, "", range_status,
-                        error_summaries + ["Skipped bounds"],
+                        [*error_summaries, "Skipped bounds"],
                     )
 
                 logger.info(

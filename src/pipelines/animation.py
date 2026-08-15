@@ -5,7 +5,8 @@
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 if TYPE_CHECKING:
     from range_parsers import PageRangeSelector
@@ -56,17 +57,19 @@ class AnimationPipeline(BaseMediaPipeline):
                 if not pool_indices:
                     return self.finalize_results(
                         0, 0, 0, 0, total_frames, "", range_status,
-                        error_summaries + ["Skipped by bounds"],
+                        [*error_summaries, "Skipped by bounds"],
                     )
 
                 target_count = self.settings.ANIMATION_TARGET_TOTAL_FRAMES
                 extract_count = min(len(pool_indices), target_count)
 
                 if len(pool_indices) > extract_count:
-                    compression_message = f"Compressed: Selected {extract_count} candidates from {len(pool_indices)} requested"
+                    compression_message = (f"Compressed: Selected {extract_count} "
+                                           f"candidates from {len(pool_indices)} requested")
                     error_summaries.append(compression_message)
                     logger.info(
-                        f"[{self.file_id}] Budget Cap Reached: Compressing {len(pool_indices)} requested frames down to {extract_count}."
+                        f"[{self.file_id}] Budget Cap Reached: Compressing "
+                        f"{len(pool_indices)} requested frames down to {extract_count}."
                     )
 
                     if range_status == RangeStatus.OK.value:

@@ -6,6 +6,7 @@ import sys
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -36,22 +37,22 @@ def make_converter():
     return ToJpegConverter(90, MAX_DIMENSION, 1024, 30, (255, 255, 255))
 
 
-def make_settings(**overrides):
-    values = dict(
-        MAX_DIMENSION=MAX_DIMENSION,
-        OUTPUT_FILENAME_PREFIX_LENGTH=20,
-        OUTPUT_FILENAME_TIMESTAMPS=True,
-        DOCUMENT_MAX_PAGES=1000,
-        PDF_SCALE=2,
-        ANIMATION_TARGET_TOTAL_FRAMES=10,
-        ANIMATION_SCENE_SENSITIVITY=5.0,
-        VIDEO_MODE="SUMMARY",
-        VIDEO_SUMMARY_TARGET_TOTAL_FRAMES=3,
-        VIDEO_SUMMARY_SCENE_SENSITIVITY=0.0,
-        VIDEO_SAMPLING_CAPTURE_RATE_FPS=2.0,
-        VIDEO_SAMPLING_MAX_FRAMES_BUDGET=100,
-        VIDEO_SAMPLING_SCENE_SENSITIVITY=0.0,
-    )
+def make_settings(**overrides) -> SimpleNamespace:
+    values: dict[str, Any] = {
+        "MAX_DIMENSION": MAX_DIMENSION,
+        "OUTPUT_FILENAME_PREFIX_LENGTH": 20,
+        "OUTPUT_FILENAME_TIMESTAMPS": True,
+        "DOCUMENT_MAX_PAGES": 1000,
+        "PDF_SCALE": 2,
+        "ANIMATION_TARGET_TOTAL_FRAMES": 10,
+        "ANIMATION_SCENE_SENSITIVITY": 5.0,
+        "VIDEO_MODE": "SUMMARY",
+        "VIDEO_SUMMARY_TARGET_TOTAL_FRAMES": 3,
+        "VIDEO_SUMMARY_SCENE_SENSITIVITY": 0.0,
+        "VIDEO_SAMPLING_CAPTURE_RATE_FPS": 2.0,
+        "VIDEO_SAMPLING_MAX_FRAMES_BUDGET": 100,
+        "VIDEO_SAMPLING_SCENE_SENSITIVITY": 0.0,
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -112,7 +113,7 @@ def make_gif(path):
     frames = static + moving
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=100)
     with Image.open(path) as saved:
-        assert saved.n_frames == 10
+        assert getattr(saved, "n_frames") == 10  # noqa: B009  (encoder kept every frame)
     return path
 
 
@@ -359,7 +360,7 @@ def make_mpo(path):
     gain_map = Image.new("L", (40, 30), 128)
     photo.save(path, format="MPO", save_all=True, append_images=[gain_map])
     with Image.open(path) as check:
-        assert check.format == "MPO" and check.n_frames == 2
+        assert check.format == "MPO" and getattr(check, "n_frames") == 2  # noqa: B009
     return path
 
 
@@ -376,7 +377,9 @@ def test_mpo_yields_exactly_one_output_the_photo_not_the_gain_map(tmp_path):
     assert saved_names == ["1_photo_page_1.jpg"]
     with Image.open(tmp_path / "out" / "1_photo_page_1.jpg") as saved:
         assert saved.size == (80, 60)
-        red, green, _ = saved.resize((1, 1)).getpixel((0, 0))
+        mean_pixel = saved.resize((1, 1)).getpixel((0, 0))
+        assert isinstance(mean_pixel, tuple)
+        red, green, _ = mean_pixel
         assert red > 150 and green < 100
 
 
@@ -417,7 +420,7 @@ def test_animation_budget_compresses_and_static_scenes_are_skipped(tmp_path):
     assert len(statuses) == 4
     assert statuses.count(Status.SKIPPED.value) == 1
     assert statuses.count(Status.OK.value) == 3
-    assert "Scene static" in [r.comment for r in results if r.success == Status.SKIPPED.value][0]
+    assert "Scene static" in next(r.comment for r in results if r.success == Status.SKIPPED.value)
 
     assert summary.final_aggregate_status == Status.OK.value
     assert "Compressed:" in summary.final_aggregate_comment
@@ -441,7 +444,7 @@ def test_video_summary_mode_extracts_the_configured_total(tmp_path):
 def test_video_sampling_mode_follows_the_capture_rate_not_the_summary_target(tmp_path):
     video = make_video(tmp_path / "clip.mp4")
 
-    results, summary = run_pipeline(
+    results, _summary = run_pipeline(
         "video", video, tmp_path / "out",
         VIDEO_MODE="SAMPLING",
         VIDEO_SAMPLING_CAPTURE_RATE_FPS=2.0,
@@ -581,7 +584,7 @@ def test_video_without_rotation_flag_stays_untouched(tmp_path):
 def test_every_pipeline_releases_its_file_handle(tmp_path, kind, builder, filename):
     media = builder(tmp_path / filename)
 
-    results, summary = run_pipeline(kind, media, tmp_path / "out")
+    _results, summary = run_pipeline(kind, media, tmp_path / "out")
     assert summary is not None
 
     renamed = media.with_name(f"renamed_{filename}")
@@ -631,7 +634,7 @@ class FakeVideoStream:
     start_time = 0
     codec_context = SimpleNamespace()
 
-    def __init__(self, time_base=Fraction(1, 1000)):
+    def __init__(self, time_base: Any = Fraction(1, 1000)):
         self.time_base = time_base
 
 
@@ -753,7 +756,7 @@ def test_approximated_duration_is_flagged_in_the_summary(tmp_path, monkeypatch):
 
     install_fake_av(monkeypatch, container)
 
-    results, summary = run_pipeline(
+    _results, summary = run_pipeline(
         "video", fake_clip(tmp_path), tmp_path / "out",
         VIDEO_SUMMARY_TARGET_TOTAL_FRAMES=1,
     )
@@ -776,7 +779,7 @@ def test_corrupt_timebase_headers_abort_only_that_file(tmp_path, monkeypatch):
 
     install_fake_av(monkeypatch, container)
 
-    results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
+    _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
     assert summary.final_aggregate_status == Status.FAILURE.value
     assert "Corrupted video timebase headers" in summary.final_aggregate_comment
@@ -790,7 +793,7 @@ def test_zero_timebase_fraction_aborts_only_that_file(tmp_path, monkeypatch):
 
     install_fake_av(monkeypatch, container)
 
-    results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
+    _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
     assert summary.final_aggregate_status == Status.FAILURE.value
     assert "Zero timebase fraction" in summary.final_aggregate_comment
@@ -809,7 +812,7 @@ def test_unreadable_container_aborts_only_that_file(tmp_path, monkeypatch):
         SimpleNamespace(open=refuse_to_open, time_base=1_000_000),
     )
 
-    results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
+    _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
     assert summary.final_aggregate_status == Status.FAILURE.value
     assert "PyAV could not read container" in summary.final_aggregate_comment
@@ -823,7 +826,7 @@ def test_zero_valid_packets_is_a_per_file_metadata_error(tmp_path, monkeypatch):
 
     install_fake_av(monkeypatch, container)
 
-    results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
+    _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
     assert summary.final_aggregate_status == Status.FAILURE.value
     assert "Metadata error" in summary.final_aggregate_comment
@@ -900,7 +903,7 @@ def test_range_truncation_warning_reaches_the_summary_comment(
 ):
     media = builder(tmp_path / filename)
 
-    results, summary = run_pipeline(
+    _results, summary = run_pipeline(
         kind, media, tmp_path / "out", range_string=range_string
     )
 
@@ -939,7 +942,7 @@ def test_faked_image_header_over_an_executable_fails_cleanly(tmp_path):
     disguised.write_bytes(JPEG_MAGIC + FAKE_EXECUTABLE)
     out = tmp_path / "out"
 
-    results, summary = run_pipeline("static", disguised, out)
+    _results, summary = run_pipeline("static", disguised, out)
 
     assert summary.final_aggregate_status == Status.FAILURE.value
     assert "cannot identify image file" in summary.final_aggregate_comment
@@ -951,7 +954,7 @@ def test_supported_extension_cannot_smuggle_an_unsupported_format(tmp_path):
     Image.new("RGB", (16, 16), (7, 7, 7)).save(disguised, "PPM")
     out = tmp_path / "out"
 
-    results, summary = run_pipeline("static", disguised, out)
+    _results, summary = run_pipeline("static", disguised, out)
 
     assert summary.final_aggregate_status == Status.FAILURE.value
     assert "cannot identify image file" in summary.final_aggregate_comment
@@ -990,7 +993,7 @@ def test_the_cleaned_message_still_names_the_file_the_user_recognises(tmp_path):
     junk = tmp_path / "totally_an_image_bro.jpeg"
     junk.write_bytes(FAKE_EXECUTABLE)
 
-    results, summary = run_pipeline("static", junk, tmp_path / "out")
+    _results, summary = run_pipeline("static", junk, tmp_path / "out")
 
     comment = summary.final_aggregate_comment
     assert LONG_PATH_PREFIX not in comment
@@ -1019,7 +1022,7 @@ def test_payload_appended_to_a_real_image_never_reaches_the_output(tmp_path):
     source.write_bytes(source.read_bytes() + FAKE_EXECUTABLE)
     out = tmp_path / "out"
 
-    results, summary = run_pipeline("static", source, out)
+    _results, summary = run_pipeline("static", source, out)
 
     assert summary.final_aggregate_status == Status.OK.value
     written = sorted(out.iterdir())
@@ -1041,7 +1044,7 @@ def test_wrong_extension_still_converts_when_the_contents_are_supported(
     Image.new("RGB", (40, 30), (90, 20, 20)).save(mislabelled, real_format)
     out = tmp_path / "out"
 
-    results, summary = run_pipeline("static", mislabelled, out)
+    _results, summary = run_pipeline("static", mislabelled, out)
 
     assert summary.final_aggregate_status == Status.OK.value
     assert len(list(out.iterdir())) == 1

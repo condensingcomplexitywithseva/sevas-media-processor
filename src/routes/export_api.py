@@ -16,7 +16,7 @@ exports_bp = Blueprint('exports', __name__)
 
 
 def _explorer_path() -> str:
-    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+    return os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"),
                         "explorer.exe")
 
 

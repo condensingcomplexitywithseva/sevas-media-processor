@@ -49,52 +49,51 @@ class ProcessorCore:
         Path(get_safe_path(self.settings.OUTPUT_FOLDER_PATH)).mkdir(parents=True, exist_ok=True)
 
         safe_run_folder = Path(get_safe_path(self.settings.CURRENT_RUN_FOLDER))
-        if self.settings.START_OVER and safe_run_folder.exists():
-            if any(safe_run_folder.iterdir()):
-                from datetime import datetime
-                from schemas import ConfigurationError
+        if self.settings.START_OVER and safe_run_folder.exists() and any(safe_run_folder.iterdir()):
+            from datetime import datetime
+            from schemas import ConfigurationError
 
-                timestamp = (
-                    datetime.now().isoformat(timespec="seconds").replace(":", "-").replace("T", "_")
+            timestamp = (
+                datetime.now().isoformat(timespec="seconds").replace(":", "-").replace("T", "_")
+            )
+            archived_name = f"old_{self.settings.CURRENT_RUN_FOLDER.name}_{timestamp}"
+            archive_target = self.settings.OUTPUT_FOLDER_PATH / archived_name
+            suffix_counter = 2
+            while Path(get_safe_path(archive_target)).exists():
+                archive_target = (
+                    self.settings.OUTPUT_FOLDER_PATH / f"{archived_name}-{suffix_counter}"
                 )
-                archived_name = f"old_{self.settings.CURRENT_RUN_FOLDER.name}_{timestamp}"
-                archive_target = self.settings.OUTPUT_FOLDER_PATH / archived_name
-                suffix_counter = 2
-                while Path(get_safe_path(archive_target)).exists():
-                    archive_target = (
-                        self.settings.OUTPUT_FOLDER_PATH / f"{archived_name}-{suffix_counter}"
-                    )
-                    suffix_counter += 1
+                suffix_counter += 1
 
-                for attempt in range(1, ARCHIVE_RENAME_ATTEMPTS + 1):
-                    try:
-                        safe_run_folder.rename(get_safe_path(archive_target))
-                        if attempt > 1:
-                            logger.info("archive rename succeeded on attempt %d", attempt)
-                        break
-                    except OSError as rename_error:
-                        blocking_error = rename_error
+            for attempt in range(1, ARCHIVE_RENAME_ATTEMPTS + 1):
+                try:
+                    safe_run_folder.rename(get_safe_path(archive_target))
+                    if attempt > 1:
+                        logger.info("archive rename succeeded on attempt %d", attempt)
+                    break
+                except OSError as rename_error:
+                    blocking_error = rename_error
 
-                        if attempt == 1 and windows_shell.is_available():
-                            try:
-                                windows_shell.rename_folder_like_explorer(
-                                    self.settings.CURRENT_RUN_FOLDER, archive_target
-                                )
-                            except OSError as shell_error:
-                                blocking_error = shell_error
-                            else:
-                                logger.info(
-                                    "archive rename needed the shell fallback; a "
-                                    "folder was open in Explorer"
-                                )
-                                break
+                    if attempt == 1 and windows_shell.is_available():
+                        try:
+                            windows_shell.rename_folder_like_explorer(
+                                self.settings.CURRENT_RUN_FOLDER, archive_target
+                            )
+                        except OSError as shell_error:
+                            blocking_error = shell_error
+                        else:
+                            logger.info(
+                                "archive rename needed the shell fallback; a "
+                                "folder was open in Explorer"
+                            )
+                            break
 
-                        last_attempt = attempt == ARCHIVE_RENAME_ATTEMPTS
-                        if last_attempt or self.abort_flag.is_set():
-                            raise ConfigurationError(
-                                f"i18n:err_archive_locked|{_format_os_error(blocking_error)}"
-                            ) from blocking_error
-                        time.sleep(ARCHIVE_RENAME_RETRY_DELAY_SECONDS)
+                    last_attempt = attempt == ARCHIVE_RENAME_ATTEMPTS
+                    if last_attempt or self.abort_flag.is_set():
+                        raise ConfigurationError(
+                            f"i18n:err_archive_locked|{_format_os_error(blocking_error)}"
+                        ) from blocking_error
+                    time.sleep(ARCHIVE_RENAME_RETRY_DELAY_SECONDS)
 
         Path(get_safe_path(self.settings.TECH_FOLDER_PATH)).mkdir(parents=True, exist_ok=True)
         Path(get_safe_path(self.settings.CURRENT_RUN_FOLDER)).mkdir(parents=True, exist_ok=True)

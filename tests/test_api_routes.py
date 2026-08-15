@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -63,7 +64,7 @@ def api(tmp_path, monkeypatch):
         mgr.settings_path.write_text(json.dumps(payload), encoding="utf-8")
         return create_app()
 
-    build.mgr = mgr
+    setattr(build, "mgr", mgr)  # noqa: B010  (for tests that seed the sandbox .env / paths)
     yield build
     exec_api.abort_flag.clear()
 
@@ -72,7 +73,7 @@ def api(tmp_path, monkeypatch):
 def fake_core(monkeypatch):
     class FakeCore:
         release = threading.Event()
-        instances = []
+        instances: ClassVar[list] = []
 
         def __init__(self, settings, abort_flag, on_progress=None):
             FakeCore.instances.append(self)
@@ -833,10 +834,9 @@ def _spawn_calls(text: str):
             for alias in node.names:
                 if alias.name in ("subprocess", "os"):
                     module_aliases[alias.asname or alias.name] = alias.name
-        elif isinstance(node, ast.ImportFrom):
-            if node.module in ("subprocess", "os"):
-                for alias in node.names:
-                    func_aliases[alias.asname or alias.name] = (node.module, alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module in ("subprocess", "os"):
+            for alias in node.names:
+                func_aliases[alias.asname or alias.name] = (node.module, alias.name)
 
     def spawn_name(func):
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):

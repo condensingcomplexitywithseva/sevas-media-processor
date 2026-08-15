@@ -1,7 +1,6 @@
 # Copyright 2026 Vsevolod Belonogov
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 import sys
 from pathlib import Path
 from urllib.parse import urlparse

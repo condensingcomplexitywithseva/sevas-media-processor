@@ -8,13 +8,14 @@ import threading
 import time
 import requests
 from pathlib import Path
-from typing import List, Any, Optional
+from typing import Any
 import os
 import re
 
 from config_loader import get_env_tokens
 from fs_utils import get_safe_path, read_prompt
 from schemas import Status, InferenceResult, ConfigurationError
+import contextlib
 
 network_client_logger = logging.getLogger("LLMNetworkClient")
 
@@ -24,7 +25,7 @@ class LLMRequestAbortedByUser(Exception):
 
 class LLMClient:
 
-    def __init__(self, settings, token: Optional[str] = None):
+    def __init__(self, settings, token: str | None = None):
         provider_config = settings.ACTIVE_PROVIDER_CONFIG
 
         self.target_endpoint_url = provider_config.url
@@ -65,7 +66,9 @@ class LLMClient:
         self.active_security_token = live_token or os.environ.get(token_env_key)
 
         if not self.active_security_token and settings.LLM_PROVIDER not in ["ollama", "lm-studio", "custom"]:
-            network_client_logger.warning(f"No API key detected for {settings.LLM_PROVIDER}. Client may encounter HTTP 401 Unauthorized errors.")
+            network_client_logger.warning(
+                f"No API key detected for {settings.LLM_PROVIDER}. "
+                f"Client may encounter HTTP 401 Unauthorized errors.")
 
 
     def _load_prompt_content(self, input_val: str, mode: str) -> str:
@@ -75,7 +78,7 @@ class LLMClient:
             network_client_logger.error(f"Failed to read prompt file ({input_val}): {e}")
             return ""
 
-    def _abortable_sleep(self, seconds: float, abort_flag: Optional[Any]) -> bool:
+    def _abortable_sleep(self, seconds: float, abort_flag: Any | None) -> bool:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             if abort_flag is not None and abort_flag.is_set():
@@ -83,7 +86,7 @@ class LLMClient:
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
         return abort_flag is not None and abort_flag.is_set()
 
-    def _post_with_abort(self, headers: dict, payload: dict, abort_flag: Optional[Any]) -> requests.Response:
+    def _post_with_abort(self, headers: dict, payload: dict, abort_flag: Any | None) -> requests.Response:
         session = requests.Session()
         outcome = {}
 
@@ -113,10 +116,8 @@ class LLMClient:
         while worker.is_alive():
             worker.join(0.5)
             if abort_flag is not None and abort_flag.is_set():
-                try:
+                with contextlib.suppress(Exception):
                     session.close()
-                except Exception:
-                    pass
                 raise LLMRequestAbortedByUser("LLM request aborted by user Stop command.")
 
         session.close()
@@ -128,9 +129,10 @@ class LLMClient:
         with open(get_safe_path(image_path), "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    def _encode_chunk_content(self, chunk_paths: List[Path], errors: List[str]) -> tuple[list[dict[str, Any]], int]:
+    def _encode_chunk_content(self, chunk_paths: list[Path], errors: list[str]) -> tuple[list[dict[str, Any]], int]:
         content: list[dict[str, Any]] = []
-        if self.user_prompt_string: content.append({"type": "text", "text": self.user_prompt_string})
+        if self.user_prompt_string:
+            content.append({"type": "text", "text": self.user_prompt_string})
 
         encoded_count = 0
         for image_path in chunk_paths:
@@ -184,7 +186,9 @@ class LLMClient:
 
         return headers
 
-    def _send_chunk_with_retries(self, chunk_num: int, headers: dict, payload: dict, abort_flag: Optional[Any], answers: List[str], errors: List[str]) -> tuple[bool, Any]:
+    def _send_chunk_with_retries(self, chunk_num: int, headers: dict, payload: dict,
+                                 abort_flag: Any | None, answers: list[str],
+                                 errors: list[str]) -> tuple[bool, Any]:
         for attempt in range(1, self.maximum_network_retries + 1):
             try:
                 try:
@@ -214,8 +218,8 @@ class LLMClient:
                 err_response = getattr(net_err, "response", None)
 
                 if err_response is not None:
-                    try: details += f" | Server Response Body: {err_response.text}"
-                    except Exception: pass
+                    with contextlib.suppress(Exception):
+                        details += f" | Server Response Body: {err_response.text}"
 
                 network_client_logger.warning(f"Network attempt {attempt} failed for chunk {chunk_num}: {details}")
 
@@ -234,7 +238,7 @@ class LLMClient:
 
         return False, None
 
-    def _parse_response_text(self, chunk_num: int, parsed: Any, answers: List[str], errors: List[str]) -> Optional[str]:
+    def _parse_response_text(self, chunk_num: int, parsed: Any, answers: list[str], errors: list[str]) -> str | None:
         try:
             finish_reason = None
             if "choices" in parsed:
@@ -290,13 +294,14 @@ class LLMClient:
                     network_client_logger.warning(msg)
                     errors.append(msg)
 
-            if not text.strip(): raise ValueError("The LLM returned an empty string or a null payload.")
+            if not text.strip():
+                raise ValueError("The LLM returned an empty string or a null payload.")
 
         except (KeyError, IndexError, TypeError, ValueError) as schema_err:
             msg = f"FATAL PARSE ERROR: Unexpected JSON schema returned from server. Details: {schema_err}"
             if self.halt_batch_on_parse_error:
                 network_client_logger.critical(msg)
-                raise ConfigurationError(msg)
+                raise ConfigurationError(msg) from schema_err
             else:
                 network_client_logger.error(f"Chunk {chunk_num} Parse Error: {msg}")
                 errors.append(f"Chunk {chunk_num} Parse Error: {schema_err}")
@@ -305,11 +310,13 @@ class LLMClient:
 
         return text
 
-    def execute_network_inference(self, image_paths: List[Path], abort_flag: Optional[Any] = None) -> InferenceResult:
+    def execute_network_inference(self, image_paths: list[Path], abort_flag: Any | None = None) -> InferenceResult:
 
         if not image_paths:
-            network_client_logger.warning(f"Network error: No image paths provided.")
-            return InferenceResult(status=Status.FAILURE.value, answer="No images provided for network inference.", error="No paths routed to LLM Client.")
+            network_client_logger.warning("Network error: No image paths provided.")
+            return InferenceResult(status=Status.FAILURE.value,
+                                   answer="No images provided for network inference.",
+                                   error="No paths routed to LLM Client.")
 
         answers = []
         errors = []
@@ -362,4 +369,5 @@ class LLMClient:
         elif chunks_ok > 0:
             return InferenceResult(status=Status.LLM_PARTIAL.value, answer=answer, error=combined_error)
         else:
-            return InferenceResult(status=Status.LLM_FAILED.value, answer="[TOTAL LLM NETWORK FAILURE]", error=combined_error)
+            return InferenceResult(status=Status.LLM_FAILED.value,
+                                   answer="[TOTAL LLM NETWORK FAILURE]", error=combined_error)

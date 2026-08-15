@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import windows_shell
+import contextlib
 
 on_windows = pytest.mark.skipif(
     not windows_shell.IS_WINDOWS, reason="the shell rename is a Windows API"
@@ -59,10 +60,8 @@ def test_an_existing_target_is_never_silently_overwritten(tmp_path):
     target.mkdir()
     (target / "precious.jpg").write_bytes(b"an earlier archive")
 
-    try:
+    with contextlib.suppress(OSError):
         windows_shell.rename_folder_like_explorer(source, target)
-    except OSError:
-        pass
     assert (target / "precious.jpg").read_bytes() == b"an earlier archive"
 
 

@@ -12,7 +12,7 @@ if str(TESTS) not in sys.path:
 
 from PIL import Image
 
-from fake_llm.harness import wire_provider
+from fake_llm.harness import wire_provider  # noqa: F401
 from schemas import Status
 
 

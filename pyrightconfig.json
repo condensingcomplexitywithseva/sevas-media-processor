@@ -1,0 +1,26 @@
+{
+    "include": [
+        "src",
+        "tests"
+    ],
+    "exclude": [
+        "venv",
+        "**/node_modules",
+        "**/__pycache__",
+        "**/.*"
+    ],
+    "venvPath": ".",
+    "venv": "venv",
+    "typeCheckingMode": "standard",
+    "pythonPlatform": "Windows",
+    "reportMissingModuleSource": "none",
+    "executionEnvironments": [
+        {
+            "root": "tests",
+            "extraPaths": [
+                "src",
+                "tests"
+            ]
+        }
+    ]
+}

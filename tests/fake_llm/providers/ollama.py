@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 import random
-import time
 from datetime import datetime, timezone
 
-from flask import Flask, request
+from flask import Flask
 
 from ..core import ProviderServer
 from ..content import ContentPolicy, estimate_tokens
@@ -52,9 +51,7 @@ def _is_known(model: str) -> bool:
     norm = _normalize(model)
     if norm in _MODELS:
         return True
-    if norm.endswith(":latest") and norm[: -len(":latest")] in _MODELS:
-        return True
-    return False
+    return bool(norm.endswith(":latest") and norm[:-len(":latest")] in _MODELS)
 
 
 def _iso_now() -> str:
@@ -65,9 +62,7 @@ def _wants_think(body: dict) -> bool:
     think = body.get("think")
     if think is True:
         return True
-    if isinstance(think, str) and think in _THINK_LEVELS:
-        return True
-    return False
+    return bool(isinstance(think, str) and think in _THINK_LEVELS)
 
 
 class OllamaServer(ProviderServer):
@@ -106,8 +101,8 @@ class OllamaServer(ProviderServer):
     def _native_error(self, message: str, status: int):
         return self.json_response({"error": message}, status=status)
 
-    def _stats(self, prompt_text: str, text: str, thinking_text: str = ""):
-        prompt_tokens = estimate_tokens(prompt_text) or 11
+    def _stats(self, prompt_text: str | None, text: str, thinking_text: str = ""):
+        prompt_tokens = estimate_tokens(prompt_text or "") or 11
         eval_tokens = estimate_tokens(text) + (
             estimate_tokens(thinking_text) if thinking_text else 0)
         return {
@@ -268,7 +263,7 @@ class OllamaServer(ProviderServer):
 
 
     def api_tags(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         models = []
@@ -311,14 +306,14 @@ class OllamaServer(ProviderServer):
 
 
     def api_version(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         return self.json_response({"version": "0.5.0"})
 
 
     def api_ps(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         return self.json_response({
@@ -467,7 +462,7 @@ class OllamaServer(ProviderServer):
         })
 
     def v1_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         data = [{"id": m, "object": "model", "created": 1751712000,
@@ -475,7 +470,7 @@ class OllamaServer(ProviderServer):
         return self.json_response({"object": "list", "data": data})
 
     def v1_get_model(self, model: str):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         if not _is_known(model):

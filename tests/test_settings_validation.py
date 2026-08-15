@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,8 +46,8 @@ def mgr(tmp_path, monkeypatch):
     return m
 
 
-def base_paths(tmp_path, **overrides):
-    payload = {
+def base_paths(tmp_path, **overrides) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "INPUT_FOLDER_PATH": str(tmp_path / "input"),
         "OUTPUT_FOLDER_PATH": str(tmp_path / "output"),
     }
@@ -114,11 +115,11 @@ def test_llm_enabled_requires_token(mgr, tmp_path):
 
 def test_llm_incomplete_ai_never_blames_mode_field(mgr, tmp_path):
     cases = [
-        (dict(LLM_PROVIDER="custom"), "LLM_PROVIDERS.custom.url"),
-        (dict(LLM_PROVIDER="custom"), "LLM_PROVIDERS.custom.model"),
-        (dict(LLM_PROVIDER="ollama", LLM_USER_PROMPT=" "), "LLM_USER_PROMPT"),
-        (dict(LLM_PROVIDER="ollama", LLM_SYSTEM_PROMPT=" "), "LLM_SYSTEM_PROMPT"),
-        (dict(LLM_PROVIDER="openai"), "ENV_TOKENS.openai"),
+        ({"LLM_PROVIDER": "custom"}, "LLM_PROVIDERS.custom.url"),
+        ({"LLM_PROVIDER": "custom"}, "LLM_PROVIDERS.custom.model"),
+        ({"LLM_PROVIDER": "ollama", "LLM_USER_PROMPT": " "}, "LLM_USER_PROMPT"),
+        ({"LLM_PROVIDER": "ollama", "LLM_SYSTEM_PROMPT": " "}, "LLM_SYSTEM_PROMPT"),
+        ({"LLM_PROVIDER": "openai"}, "ENV_TOKENS.openai"),
     ]
     for overrides, expected_key in cases:
         errors, _ = validate(mgr, base_paths(
@@ -315,6 +316,13 @@ def test_ui_load_reports_broken_json_and_falls_back_to_defaults(mgr):
     assert merged["JPEG_QUALITY"] == 90
     assert errors["general"]["type"] == "i18n"
     assert errors["general"]["value"] == "err_broken_json"
+
+
+def test_defaults_are_validated_like_user_values():
+    fresh = Settings()
+    assert isinstance(fresh.INPUT_FOLDER_PATH, Path)
+    assert isinstance(fresh.OUTPUT_FOLDER_PATH, Path)
+    assert Settings.model_config.get("validate_default") is True
 
 
 def test_ui_load_valid_file(mgr, tmp_path):

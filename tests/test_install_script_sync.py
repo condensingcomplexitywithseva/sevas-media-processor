@@ -41,7 +41,7 @@ def extract_script_body(text):
 
 def extract_readme_block(text):
     lines = text.splitlines()
-    starts = [i for i, l in enumerate(lines) if l.strip() == FENCE_OPEN]
+    starts = [i for i, line in enumerate(lines) if line.strip() == FENCE_OPEN]
     assert len(starts) == 1, (
         f"expected exactly one {FENCE_OPEN} fence in the README, "
         f"found {len(starts)}"
@@ -72,7 +72,7 @@ def extract_readme_block(text):
 
 
 def normalize_readme_block(block):
-    assignment_hits = [l for l in block if l.strip() == README_ASSIGNMENT]
+    assignment_hits = [line for line in block if line.strip() == README_ASSIGNMENT]
     assert len(assignment_hits) == 1, (
         f"expected exactly one '{README_ASSIGNMENT}' line in the README "
         f"block, found {len(assignment_hits)}"
@@ -97,7 +97,7 @@ def test_readme_block_matches_install_ps1():
         extract_readme_block((REPO_ROOT / "README.md").read_text(encoding="utf-8"))
     )
 
-    script_hits = [l for l in script if l.strip() == FILE_ASSIGNMENT]
+    script_hits = [line for line in script if line.strip() == FILE_ASSIGNMENT]
     assert len(script_hits) == 1, (
         f"expected exactly one '{FILE_ASSIGNMENT}' line in install.ps1, "
         f"found {len(script_hits)}"

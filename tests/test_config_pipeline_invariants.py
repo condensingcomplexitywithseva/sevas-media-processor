@@ -43,7 +43,7 @@ def client(mgr):
             url, json=payload, headers={"X-App-Token": SESSION_TOKEN}
         )
 
-    test_client.post_json = post_json
+    setattr(test_client, "post_json", post_json)  # noqa: B010
     return test_client
 
 
@@ -157,8 +157,8 @@ def test_error_catalogue_exact_shapes(mgr, tmp_path):
     empty_file = tmp_path / "empty.txt"
     empty_file.write_text("", encoding="utf-8")
     missing = str(tmp_path / "does_not_exist")
-    ai = dict(ENABLE_LLM_INFERENCE=True,
-              ENV_TOKENS={"openai": "sk-fake0123456789abcdef0123456789abcdef"})
+    ai = {"ENABLE_LLM_INFERENCE": True,
+              "ENV_TOKENS": {"openai": "sk-fake0123456789abcdef0123456789abcdef"}}
 
     cases = [
         ({"IMAGE_RANGE": "abc"}, "IMAGE_RANGE",

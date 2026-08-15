@@ -7,20 +7,11 @@ from fractions import Fraction
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Generator
 
 if TYPE_CHECKING:
     from range_parsers import VideoSelector
-
-try:
-    import av
-    from av.error import InvalidDataError, ArgumentError as AvValueError
-except ImportError as e:
-    av = None
-    av_err = str(e)
-except Exception as unexpected:
-    av = None
-    av_err = str(unexpected)
 
 from PIL import Image
 
@@ -28,6 +19,24 @@ from fs_utils import format_hms, get_safe_path
 from schemas import Status, PageResult, FileSummary
 from pipelines.base_pipeline import BaseMediaPipeline
 from to_jpeg_converter import ToJpegConverter, is_frame_distinct
+import contextlib
+
+
+class _AvUnavailableError(Exception):
+    pass
+
+
+try:
+    import av
+    from av.error import InvalidDataError, ArgumentError as AvValueError
+except ImportError as e:
+    av = None
+    av_err = str(e)
+    InvalidDataError = AvValueError = _AvUnavailableError
+except Exception as unexpected:
+    av = None
+    av_err = str(unexpected)
+    InvalidDataError = AvValueError = _AvUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +278,7 @@ class VideoPipeline(BaseMediaPipeline):
                         total_frames,
                         "",
                         range_status,
-                        error_summaries + ["Skipped requested range out of bounds"],
+                        [*error_summaries, "Skipped requested range out of bounds"],
                     )
 
                 sensitivity = active_config["SCENE_SENSITIVITY"]
@@ -446,7 +455,7 @@ class VideoPipeline(BaseMediaPipeline):
 
                     except InvalidDataError as corrupted_packet_error:
                         failed_count += 1
-                        err_msg = f"Corrupted video packet near {format_hms(target_sec)}: {str(corrupted_packet_error)}"
+                        err_msg = f"Corrupted video packet near {format_hms(target_sec)}: {corrupted_packet_error!s}"
                         error_summaries.append(err_msg)
                         logger.error(err_msg, exc_info=True)
                         yield PageResult(frame_num, out_name, Status.FAILURE.value, err_msg)
@@ -462,10 +471,8 @@ class VideoPipeline(BaseMediaPipeline):
 
                     finally:
                         if captured_img is not None:
-                            try:
+                            with contextlib.suppress(Exception):
                                 captured_img.close()
-                            except Exception:
-                                pass
 
             return self.finalize_results(
                 len(target_times),

@@ -59,9 +59,7 @@ def _reasoning_requested(model_meta: dict | None, body: dict) -> bool:
     if "reasoning_effort" in body:
         return True
     r = body.get("reasoning")
-    if isinstance(r, dict) or isinstance(r, str):
-        return True
-    return False
+    return bool(isinstance(r, (dict, str)))
 
 
 class LMStudioServer(ProviderServer):
@@ -219,6 +217,7 @@ class LMStudioServer(ProviderServer):
         body, model_id, err = self._validate_chat(rec)
         if err is not None:
             return err
+        assert body is not None and model_id is not None
 
         if body.get("stream"):
             return self._stream_chat(body, model_id)
@@ -235,6 +234,7 @@ class LMStudioServer(ProviderServer):
         body, model_id, err = self._validate_chat(rec)
         if err is not None:
             return err
+        assert body is not None and model_id is not None
 
         if body.get("stream"):
             return self._stream_chat(body, model_id)
@@ -355,7 +355,7 @@ class LMStudioServer(ProviderServer):
 
 
     def list_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         data = [{"id": mid, "object": "model", "owned_by": "organization_owner"}
@@ -377,7 +377,7 @@ class LMStudioServer(ProviderServer):
         }
 
     def list_models_v0(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         data = [self._v0_model_entry(mid, meta)
@@ -385,7 +385,7 @@ class LMStudioServer(ProviderServer):
         return self.json_response({"object": "list", "data": data})
 
     def get_model_v0(self, model: str):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         mid = _canonical(model)

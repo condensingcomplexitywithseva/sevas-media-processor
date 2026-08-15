@@ -9,6 +9,7 @@ import threading
 import time
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,6 +17,10 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 import main as main_module
+
+
+def blank_module(name: str) -> Any:
+    return types.ModuleType(name)
 
 FAKE_PORT = 45678
 FAKE_SESSION_TOKEN = "fake-session-token-for-the-handoff-tests"
@@ -110,7 +115,7 @@ class StartupHarness:
         return self.webview.windows
 
     def _make_webview(self):
-        mod = types.ModuleType("webview")
+        mod = blank_module("webview")
         mod.windows = []
         mod.settings = {}
         mod.scenario = None
@@ -130,7 +135,7 @@ class StartupHarness:
         return mod
 
     def _make_config_loader(self):
-        mod = types.ModuleType("config_loader")
+        mod = blank_module("config_loader")
         mod.get_env_tokens = lambda: {}
         mod.log_settings_errors = lambda errors: None
 
@@ -143,8 +148,8 @@ class StartupHarness:
         return mod
 
     def _make_routes(self):
-        routes_pkg = types.ModuleType("routes")
-        web_server = types.ModuleType("routes.web_server")
+        routes_pkg = blank_module("routes")
+        web_server = blank_module("routes.web_server")
 
         def create_app():
             if self.create_app_error is not None:
@@ -158,15 +163,15 @@ class StartupHarness:
 
     @staticmethod
     def _make_central_logger():
-        mod = types.ModuleType("central_logger")
+        mod = blank_module("central_logger")
         mod.setup_logging = lambda level, memory_buffer_handler=None: None
         mod.close_logging = lambda: None
         return mod
 
     @staticmethod
     def _make_werkzeug():
-        werkzeug_pkg = types.ModuleType("werkzeug")
-        serving = types.ModuleType("werkzeug.serving")
+        werkzeug_pkg = blank_module("werkzeug")
+        serving = blank_module("werkzeug.serving")
 
         class FakeServer:
             server_port = FAKE_PORT
@@ -201,7 +206,7 @@ def test_happy_path_splash_shows_then_main_replaces_it(startup):
 
     startup.run(scenario)
 
-    splash, main_w = startup.windows
+    _splash, main_w = startup.windows
     assert seen["splash_shown_on_loaded"] == 1
     assert seen["backend_navigated"] is True
     assert main_w.loaded_urls == [f"http://127.0.0.1:{FAKE_PORT}"]
@@ -281,7 +286,7 @@ def test_backend_crash_tears_down_both_windows_and_reports(startup):
     with pytest.raises(RuntimeError, match="Fatal Startup Error"):
         startup.run(scenario)
 
-    splash, main_w = startup.windows
+    _splash, main_w = startup.windows
     assert seen["splash_torn_down"] is True
     assert seen["main_torn_down"] is True
     assert main_w.show_calls == 0, "a crashed boot must never reveal the main window"
@@ -364,7 +369,7 @@ def test_the_api_token_is_pushed_into_the_window_and_never_rendered(startup):
 
     startup.run(scenario)
 
-    splash, main_w = startup.windows
+    _splash, main_w = startup.windows
     assert seen["backend_navigated"] is True
     assert seen["delivered"] is True, "the token was never pushed into the window"
 
@@ -443,7 +448,7 @@ def test_a_failed_token_push_does_not_crash_the_startup(startup):
 
 
 def test_browse_file_dialog_filters_to_txt(monkeypatch):
-    fake_webview = types.ModuleType("webview")
+    fake_webview = blank_module("webview")
     fake_webview.FileDialog = types.SimpleNamespace(
         OPEN=object(), FOLDER=object(), SAVE=object()
     )

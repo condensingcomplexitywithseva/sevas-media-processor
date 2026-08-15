@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Optional
+from dataclasses import dataclass
+from typing import Any
+from collections.abc import Iterable
 
 from flask import Flask, Response, request
 from werkzeug.serving import make_server
@@ -58,7 +59,7 @@ class ProviderServer:
         return self.json_response({"error": "not found"}, status=404)
 
 
-    def start(self, port: Optional[int] = None, host: str = "127.0.0.1"):
+    def start(self, port: int | None = None, host: str = "127.0.0.1"):
         bind_port = 0 if port is None else port
         self._server = make_server(host, bind_port, self._app, threaded=True)
         self._host = host
@@ -83,6 +84,7 @@ class ProviderServer:
 
     @property
     def port(self) -> int:
+        assert self._server is not None
         return self._server.server_port
 
     @property
@@ -103,8 +105,8 @@ class ProviderServer:
         rec = RecordedRequest(
             method=request.method,
             path=request.path,
-            query={k: v for k, v in request.args.items()},
-            headers={k: v for k, v in request.headers.items()},
+            query=dict(request.args.items()),
+            headers=dict(request.headers.items()),
             body_bytes=bytes(body),
             json=parsed,
             json_ok=ok,
@@ -121,7 +123,7 @@ class ProviderServer:
             return rec, None
         return rec, self._apply(behavior, rec)
 
-    def _apply(self, behavior: dict, rec: RecordedRequest) -> Response:
+    def _apply(self, behavior: dict, rec: RecordedRequest | None) -> Response:
         hook = behavior.get("on_request")
         if hook is not None:
             hook(rec)
@@ -163,14 +165,14 @@ class ProviderServer:
             return resp
         return self.json_response(behavior.get("json", {}), status=status, headers=extra)
 
-    def queue(self, **behavior) -> "ProviderServer":
+    def queue(self, **behavior) -> ProviderServer:
         with self._lock:
             self._script.append(behavior)
         return self
 
 
     def json_response(self, obj: Any, status: int = 200,
-                      headers: Optional[dict] = None) -> Response:
+                      headers: dict | None = None) -> Response:
         body = json.dumps(obj, ensure_ascii=False)
         resp = Response(body, status=status)
         resp.headers["Content-Type"] = "application/json"
@@ -180,7 +182,7 @@ class ProviderServer:
         return resp
 
     def sse_response(self, events: Iterable[str], status: int = 200,
-                     headers: Optional[dict] = None) -> Response:
+                     headers: dict | None = None) -> Response:
         def generate():
             for ev in events:
                 text = ev if ev.endswith("\n\n") else ev + "\n\n"
@@ -194,7 +196,7 @@ class ProviderServer:
         return resp
 
     def ndjson_response(self, lines: Iterable[Any], status: int = 200,
-                        headers: Optional[dict] = None) -> Response:
+                        headers: dict | None = None) -> Response:
         def generate():
             for obj in lines:
                 yield (obj if isinstance(obj, str)
@@ -222,7 +224,7 @@ class ProviderServer:
         )
 
     def _fallback(self, _any: str = ""):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         return self.handle_unknown_route()
@@ -243,7 +245,7 @@ class MultiServer:
         self.running: list[RunningProvider] = []
 
     def start(self, host: str = "127.0.0.1",
-              ports: Optional[dict[str, int]] = None) -> "MultiServer":
+              ports: dict[str, int] | None = None) -> MultiServer:
         for srv in self._servers:
             port = (ports or {}).get(srv.name, srv.default_port)
             srv.start(port=port, host=host)

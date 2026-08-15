@@ -46,10 +46,16 @@ def noise_image(width, height, seed=0):
     return Image.fromarray(pixels, "RGB")
 
 
-def reload(path: Path) -> Image.Image:
+def reload(path: Path) -> tuple[Image.Image, bytes]:
     with Image.open(path) as img:
         img.load()
         return img.copy(), Path(path).read_bytes()
+
+
+def rgb(image: Image.Image, xy: tuple[int, int]) -> tuple[int, ...]:
+    pixel = image.getpixel(xy)
+    assert isinstance(pixel, tuple)
+    return pixel
 
 
 
@@ -61,7 +67,7 @@ def test_transparent_rgba_flattens_onto_background_not_black(tmp_path):
 
     assert status == Status.OK.value
     saved, _ = reload(out)
-    r, g, b = saved.getpixel((0, 0))
+    r, g, b = rgb(saved, (0, 0))
     assert min(r, g, b) > 240
 
 
@@ -73,7 +79,7 @@ def test_transparent_la_flattens_onto_custom_background(tmp_path):
 
     assert status == Status.OK.value
     saved, _ = reload(out)
-    r, g, b = saved.getpixel((15, 15))
+    r, g, b = rgb(saved, (15, 15))
     assert r > 200 and g < 60 and b < 60
 
 
@@ -385,7 +391,7 @@ _SRGB_PURPLE = (141, 0, 133)
 
 
 def _close(actual, expected, tolerance=6):
-    return all(abs(a - e) <= tolerance for a, e in zip(actual, expected))
+    return all(abs(a - e) <= tolerance for a, e in zip(actual, expected, strict=True))
 
 
 def test_wide_gamut_p3_colors_are_baked_into_srgb_pixels(tmp_path):
@@ -397,7 +403,7 @@ def test_wide_gamut_p3_colors_are_baked_into_srgb_pixels(tmp_path):
 
     assert status == Status.OK.value
     assert "color profile" not in comment
-    saved, raw = reload(out)
+    saved, _raw = reload(out)
     pixel = saved.getpixel((30, 30))
     assert _close(pixel, _SRGB_PURPLE), f"got {pixel}, want ~{_SRGB_PURPLE}"
     assert not saved.info.get("icc_profile")
@@ -445,7 +451,7 @@ def test_wide_gamut_conversion_survives_the_transparency_flatten(tmp_path):
     assert status == Status.OK.value
     saved, _ = reload(out)
     assert _close(saved.getpixel((30, 30)), _SRGB_PURPLE, tolerance=8)
-    r, g, b = saved.getpixel((5, 5))
+    r, g, b = rgb(saved, (5, 5))
     assert min(r, g, b) > 240
 
 
@@ -587,7 +593,7 @@ def test_nothing_in_src_opens_an_image_without_the_allowlist():
         )
         for lineno in image_open_call_lines(tree):
             where = f"{module.relative_to(SRC).as_posix()}:{lineno}"
-            if gate is not None and gate.lineno <= lineno <= gate.end_lineno:
+            if gate is not None and gate.lineno <= lineno <= (gate.end_lineno or gate.lineno):
                 gate_calls.append(where)
             else:
                 offenders.append(where)

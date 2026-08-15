@@ -120,13 +120,12 @@ class OpenAIServer(ProviderServer):
                         f"{body[p]} with this model. Only the default (1) "
                         "value is supported.", param=p,
                         code="unsupported_value"), status=400)
-        if "temperature" in body and isinstance(body["temperature"], (int, float)):
-            if body["temperature"] > 2:
-                return self.json_response(oai.oai_error(
-                    "Invalid 'temperature': decimal above maximum value. "
-                    f"Expected a value <= 2, but got {body['temperature']} "
-                    "instead.", param="temperature",
-                    code="decimal_above_max_value"), status=400)
+        if "temperature" in body and isinstance(body["temperature"], (int, float)) and body["temperature"] > 2:
+            return self.json_response(oai.oai_error(
+                "Invalid 'temperature': decimal above maximum value. "
+                f"Expected a value <= 2, but got {body['temperature']} "
+                "instead.", param="temperature",
+                code="decimal_above_max_value"), status=400)
 
         text = self.content.answer(body)
         prompt_text = oai.flatten_prompt_text(messages)
@@ -197,7 +196,7 @@ class OpenAIServer(ProviderServer):
 
 
     def list_models(self):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._auth_error()
@@ -209,7 +208,7 @@ class OpenAIServer(ProviderServer):
         return self.json_response({"object": "list", "data": data})
 
     def get_model(self, model: str):
-        rec, scripted = self.intercept()
+        _rec, scripted = self.intercept()
         if scripted is not None:
             return scripted
         auth = self._auth_error()

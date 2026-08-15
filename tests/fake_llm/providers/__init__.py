@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from typing import Type
-
 from ..core import ProviderServer
 
 _LAZY: dict[str, str] = {
@@ -28,7 +26,7 @@ DEFAULT_PORTS: dict[str, int] = {
 }
 
 
-def get_provider_class(name: str) -> Type[ProviderServer]:
+def get_provider_class(name: str) -> type[ProviderServer]:
     import importlib
 
     if name not in _LAZY:

@@ -63,10 +63,9 @@ def test_pickers_use_no_deprecated_pywebview_api(caplog, method, member):
 
     api._window = FakeWindow()
 
-    with caplog.at_level(logging.WARNING):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            result = getattr(api, method)()
+    with caplog.at_level(logging.WARNING), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = getattr(api, method)()
 
     assert result is None
     assert recorded["dialog_type"] is getattr(webview.FileDialog, member)
