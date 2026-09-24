@@ -20,10 +20,10 @@ class _StubDb:
     def get_highest_file_id(self):
         return 0
 
-    def get_successfully_processed_relative_paths(self, statuses):
-        return set()
+    def get_no_retry_sources(self, results):
+        return {}
 
-    def handle_file_started(self, *args):
+    def handle_file_started(self, *args, **kwargs):
         pass
 
     def handle_frame_saved(self, *args):
@@ -31,6 +31,15 @@ class _StubDb:
 
     def handle_file_completed(self, *args):
         pass
+
+    def finalize_file(self, *args):
+        pass
+
+    def record_file_interruption(self, *args):
+        pass
+
+    def get_file_statuses(self, file_id):
+        return {}
 
 
 class _StubLogger:
@@ -57,7 +66,7 @@ class _StubRouter:
     def evaluate_and_route(self, file_id, path, root):
         def gen():
             yield PageResult(1, "x.jpg", Status.OK.value, "")
-            return FileSummary(1, "1", Status.OK.value, Status.OK.value, "done")
+            return FileSummary(1, "1", Status.OK.value, "done")
 
         rel, orphaned = self.relative_or_orphan(path, root)
         return rel, path.suffix, "Stub", gen(), orphaned
@@ -107,11 +116,19 @@ def test_abort_mid_batch_emits_aborted_event_and_keeps_partial_db(tmp_path, monk
 
     abort_flag = threading.Event()
     events = []
+    import batch_orchestrator
+    real_sha256 = batch_orchestrator.source_sha256
+
+    def sha256_then_stop(path, stop=None):
+        digest = real_sha256(path, stop)
+        if path.name == "file_1.png":
+            abort_flag.set()
+        return digest
+
+    monkeypatch.setattr(batch_orchestrator, "source_sha256", sha256_then_stop)
 
     def on_progress(event):
         events.append(event)
-        if event == {"type": "progress", "value": 25}:
-            abort_flag.set()
 
     ProcessorCore(settings, abort_flag, on_progress=on_progress).run()
 
@@ -126,11 +143,13 @@ def test_abort_mid_batch_emits_aborted_event_and_keeps_partial_db(tmp_path, monk
     connection = sqlite3.connect(db_path)
     try:
         rows = connection.execute(
-            "SELECT relative_file_path, final_aggregate_status"
-            " FROM databasefileregistry ORDER BY unique_file_id"
+            "SELECT f.file_path, o.overall_result FROM file_registry f"
+            " JOIN overall_result o ON o.file_id = f.file_id"
+            " ORDER BY f.file_id"
         ).fetchall()
     finally:
         connection.close()
 
     assert [path for path, _ in rows] == ["file_0.png", "file_1.png"]
-    assert all(status != "processing" for _, status in rows)
+    assert all(status in ("ok", "partial_fail", "fail", "skipped")
+               for _, status in rows)

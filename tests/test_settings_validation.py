@@ -12,7 +12,7 @@ import pytest
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from config_loader import ConfigManager
+from config_loader import ConfigManager, TokenManager
 from schemas import ConfigurationError
 from config_validator import Settings
 
@@ -38,6 +38,9 @@ def load_ui(mgr):
 @pytest.fixture
 def mgr(tmp_path, monkeypatch):
     m = ConfigManager(tmp_path)
+    m.app_data_dir = tmp_path
+    m.env_path = tmp_path / ".env"
+    m.token_manager = TokenManager(m.env_path)
     monkeypatch.setattr(m, "get_env_tokens", lambda: {})
     for key in list(os.environ):
         if key.endswith("_TOKEN"):
@@ -144,8 +147,9 @@ def test_load_strict_blocks_run_on_missing_token(mgr, tmp_path):
     mgr.settings_path.write_text(json.dumps(base_paths(
         tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai")),
         encoding="utf-8")
-    with pytest.raises(ConfigurationError, match="ENV_TOKENS"):
+    with pytest.raises(ConfigurationError) as refused:
         mgr.load_strict()
+    assert refused.value.setting_field == "ENV_TOKENS.openai"
 
 
 def test_draft_empty_token_string_means_no_change(mgr, tmp_path, monkeypatch):
@@ -295,9 +299,10 @@ def test_load_strict_names_the_real_failure_when_the_file_is_unreadable(mgr):
     _make_settings_path_unreadable(mgr)
     with pytest.raises(ConfigurationError) as excinfo:
         mgr.load_strict()
-    assert "could not be read" in str(excinfo.value)
-    assert "corrupted" not in str(excinfo.value)
-    assert "PermissionError" in str(excinfo.value)
+    key, _, detail = str(excinfo.value).removeprefix("i18n:").partition("|")
+    assert key == "err_settings_unreadable"
+    assert key != "err_broken_json"
+    assert "PermissionError" in detail
 
 
 def test_ui_load_names_the_real_failure_when_the_file_is_unreadable(mgr):
@@ -419,9 +424,11 @@ def test_saving_preserves_non_selected_garbage_verbatim(mgr, tmp_path):
     mgr.save_settings(settings_obj)
     on_disk = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
     assert on_disk["LLM_PROVIDERS"]["claude"]["max_tokens"] == "abc"
-    assert set(on_disk["LLM_PROVIDERS"]) >= {
-        "openai", "claude", "gemini", "deepseek", "mistral",
-        "ollama", "lm-studio", "custom",
+    assert on_disk["LLM_PROVIDERS"] == {"claude": {"max_tokens": "abc"}}
+    from config_validator import settings_form_view
+    view, _ = mgr.load_for_ui()
+    assert set(settings_form_view(view)["LLM_PROVIDERS"]) == {
+        "openai", "claude", "gemini", "deepseek", "mistral", "ollama", "lm-studio", "custom",
     }
 
 
@@ -524,3 +531,100 @@ def test_ai_off_preserves_valid_ai_values(mgr, tmp_path):
     mgr.save_settings(settings_obj)
     on_disk = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
     assert on_disk["LLM_MAX_RETRIES"] == 7
+
+
+
+def test_no_retry_statuses_accepts_exactly_the_overall_result_vocabulary(
+        mgr, tmp_path):
+    errors, _ = validate(mgr, base_paths(
+        tmp_path, NO_RETRY_STATUSES=["ok", "partial_fail", "fail", "skipped"]))
+    assert "NO_RETRY_STATUSES" not in errors
+
+    for bad_value in (["llm_partial"],
+                      ["OK"],
+                      ["ok", "Success"],
+                      ["done"]):
+        errors, _ = validate(mgr, base_paths(
+            tmp_path, NO_RETRY_STATUSES=bad_value))
+        assert "NO_RETRY_STATUSES" in errors, f"accepted {bad_value!r}"
+
+
+def test_no_retry_checkbox_group_lists_exactly_the_enum_vocabulary():
+    import re as _re
+
+    from schemas import OverallResult
+
+    template = (SRC / "templates" / "tabs" / "general_content.html").read_text(
+        encoding="utf-8")
+    match = _re.search(r"\{% for status in \[([^\]]+)\] %\}", template)
+    assert match, "the NO_RETRY_STATUSES checkbox loop is gone from the template"
+    listed = _re.findall(r"'([^']+)'", match.group(1))
+    assert listed == [member.value for member in OverallResult]
+
+
+PRESERVED_PROVIDER_ENTRIES = [
+    {"max_tokens": "00123", "require_max_tokens": "false"},
+    {"max_tokens": "abc", "future": {"empty": {}, "literal.key": [None, False, 9007199254740993]}},
+    {}, None, [], "stored-for-later",
+]
+
+
+@pytest.mark.parametrize("provider",
+                         ["openai", "claude", "gemini", "deepseek", "mistral", "ollama", "lm-studio", "custom"])
+@pytest.mark.parametrize("ai_enabled", [False, True])
+@pytest.mark.parametrize("entry", PRESERVED_PROVIDER_ENTRIES)
+def test_inactive_provider_whole_entry_roundtrip(mgr, tmp_path, provider, ai_enabled, entry):
+    import copy
+    selected = "lm-studio" if provider == "ollama" else "ollama"
+    raw = base_paths(tmp_path, ENABLE_LLM_INFERENCE=ai_enabled, LLM_PROVIDER=selected,
+                     LLM_PROVIDERS={provider: copy.deepcopy(entry)})
+    before = json.dumps(raw, sort_keys=True)
+    obj, errors, _ = mgr.validate_draft(raw)
+    assert errors == {}
+    assert obj is not None
+    mgr.save_settings(obj)
+    saved = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
+    assert json.dumps(saved["LLM_PROVIDERS"], sort_keys=True) == json.dumps({provider: entry}, sort_keys=True)
+    assert json.dumps(raw, sort_keys=True) == before
+    loaded = mgr.load_strict()
+    assert loaded.ACTIVE_PROVIDER_CONFIG.model
+    assert isinstance(loaded.ACTIVE_PROVIDER_CONFIG.max_tokens, int)
+    mgr.save_settings(loaded)
+    assert json.loads(mgr.settings_path.read_text(encoding="utf-8")) == saved
+
+
+@pytest.mark.parametrize("selected", ["ollama", "claude"])
+def test_ai_off_preserves_all_supplied_ai_data(mgr, tmp_path, selected):
+    raw = base_paths(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDER=selected,
+                     LLM_PROVIDERS={selected: {"max_tokens": "123", "require_max_tokens": "false"}},
+                     LLM_MAX_RETRIES="003", HALT_ON_LLM_PARSE_ERROR="false", LLM_USER_PROMPT={"empty": {}})
+    obj, errors, _ = mgr.validate_draft(raw)
+    assert not errors and obj is not None
+    mgr.save_settings(obj)
+    saved = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
+    expected = {key: value for key, value in raw.items() if key in AI_TAB_FIELDS}
+    actual = {key: value for key, value in saved.items() if key in AI_TAB_FIELDS}
+    assert json.dumps(actual, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
+@pytest.mark.parametrize("entry", [{"max_tokens": "abc"}, {"max_tokens": "123"}, {}])
+def test_retirement_is_independent_of_provider_validation(mgr, tmp_path, monkeypatch, entry):
+    import config_validator
+    monkeypatch.setattr(config_validator, "RETIRED_PROVIDER_FIELDS", frozenset({"old_field"}))
+    raw = base_paths(tmp_path, ENABLE_LLM_INFERENCE=False,
+                     LLM_PROVIDERS={"claude": {**entry, "old_field": {"bad": []}, "future": {}}})
+    obj, errors, _ = mgr.validate_draft(raw)
+    assert not errors and obj is not None
+    mgr.save_settings(obj)
+    saved = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
+    assert saved["LLM_PROVIDERS"] == {"claude": {**entry, "future": {}}}
+
+
+def test_explicit_assignment_after_loading_materializes_only_that_ai_field(mgr, tmp_path):
+    mgr.settings_path.write_text(json.dumps(base_paths(tmp_path)), encoding="utf-8")
+    settings = mgr.load_strict()
+    settings.LLM_TIMEOUT_SECONDS = 42
+    mgr.save_settings(settings)
+    saved = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
+    assert saved["LLM_TIMEOUT_SECONDS"] == 42
+    assert "LLM_PROVIDERS" not in saved

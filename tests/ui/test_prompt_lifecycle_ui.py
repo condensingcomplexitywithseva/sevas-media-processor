@@ -47,12 +47,12 @@ def test_apply_with_garbage_prompt_draft_is_refused_loudly(open_page, tmp_path):
 
     page.click("#btn-apply")
     page.wait_for_function(
-        "getComputedStyle(document.getElementById('error-toast')).opacity === '1'",
+        "getComputedStyle(document.getElementById('global-error-banner')).display !== 'none'",
         timeout=5000,
     )
     state = page.evaluate(
         """() => ({
-            toast: document.getElementById('error-toast').innerText,
+            toast: document.getElementById('global-error-banner').innerText,
             field_err: document.getElementById('err-LLM_USER_PROMPT').innerText,
         })"""
     )
@@ -114,7 +114,7 @@ def test_garbage_on_disk_fails_loud_then_recovery_run_succeeds(open_page, tmp_pa
         page.wait_for_timeout(300)
         page.click("#btn-apply")
         page.wait_for_function(
-            "getComputedStyle(document.getElementById('save-toast')).opacity === '1'",
+            "getComputedStyle(document.getElementById('generic-toast')).opacity === '1'",
             timeout=5000,
         )
         recovered = start_button(page)

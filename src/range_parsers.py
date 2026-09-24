@@ -39,14 +39,25 @@ class TimeRangeResult(NamedTuple):
     details: str
 
 
-def truncate_visual_ranges(formatted_parts: list[str], limit: int = 10) -> str:
-    if len(formatted_parts) > limit:
-        half = int(limit / 2)
-        head = formatted_parts[:half]
-        tail = formatted_parts[-half:]
-        omitted = len(formatted_parts) - limit
-        return ", ".join(head) + f", ... ({omitted} ranges omitted) ..., " + ", ".join(tail)
-    return ", ".join(formatted_parts)
+def format_page_list(pages) -> str:
+    pages = list(pages)
+    if not pages:
+        return ""
+    previous = 0
+    for page in pages:
+        if not isinstance(page, int) or page <= previous:
+            raise ValueError(
+                f"page list must be strictly increasing positive integers, got {pages}")
+        previous = page
+    spans: list[str] = []
+    start = end = pages[0]
+    for page in pages[1:]:
+        if page != end + 1:
+            spans.append(str(start) if start == end else f"{start}-{end}")
+            start = page
+        end = page
+    spans.append(str(start) if start == end else f"{start}-{end}")
+    return ", ".join(spans)
 
 def calculate_summary_indices(start_idx: int, end_idx: int, target_count: int) -> SummaryIndicesResult:
     if target_count <= 0 or start_idx >= end_idx:
@@ -154,7 +165,7 @@ class PageRangeSelector:
             except (ValueError, ValidationError) as parsing_error:
                 logger.error(f"Page parser syntax error on part: '{part}'. Reason: {parsing_error}")
                 raise ConfigurationError(
-                    f"Invalid page range syntax: '{part}'. Details: {parsing_error!s}"
+                    f"i18n:err_invalid_range|'{part}': {parsing_error!s}"
                 ) from parsing_error
 
     def calculate_indices(self, total_pages: int) -> PageRangeResult:
@@ -199,7 +210,7 @@ class PageRangeSelector:
         return PageRangeResult(final_indices, status_code, "; ".join(warnings))
 
     @staticmethod
-    def format_range_string(indices: list[int], truncate: bool = True) -> str:
+    def format_range_string(indices: list[int]) -> str:
         if not indices:
             return ""
 
@@ -224,8 +235,6 @@ class PageRangeSelector:
         else:
             formatted_parts.append(f"{range_start}-{range_end}")
 
-        if truncate:
-            return truncate_visual_ranges(formatted_parts)
         return ", ".join(formatted_parts)
 
 
@@ -314,7 +323,7 @@ class VideoSelector:
             except Exception as parsing_error:
                 logger.error(f"Video parser syntax error on part: '{part}'. Reason: {parsing_error}")
                 raise ConfigurationError(
-                    f"Strict HH:MM:SS required for '{part}'. Example: 00:00:10. {parsing_error!s}"
+                    f"i18n:err_invalid_time_range|'{part}': {parsing_error!s}"
                 ) from parsing_error
 
     def get_target_times(
@@ -393,7 +402,7 @@ class VideoSelector:
         return TimeRangeResult(final_times, status_code, "; ".join(warnings))
 
     @staticmethod
-    def format_time_range(times: list[float], truncate: bool = True) -> str:
+    def format_time_range(times: list[float]) -> str:
         if not times:
             return ""
 
@@ -429,6 +438,4 @@ class VideoSelector:
         else:
             formatted_parts.append(f"{convert_seconds_to_hms(start_time)}-{convert_seconds_to_hms(previous_time)}")
 
-        if truncate:
-            return truncate_visual_ranges(formatted_parts)
         return ", ".join(formatted_parts)

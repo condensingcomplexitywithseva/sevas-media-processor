@@ -41,20 +41,20 @@ def _sse_text(resp):
 
 _HAPPY = {
     "openai":   ("/v1/chat/completions", {"Authorization": "Bearer sk-x"},
-                 {"model": "gpt-5.5", "messages": [{"role": "user", "content": "hi"}]}),
+                 {"model": "gpt-5.6", "messages": [{"role": "user", "content": "hi"}]}),
     "claude":   ("/v1/messages", {"x-api-key": "sk-ant-x", "anthropic-version": "2023-06-01"},
                  {"model": "claude-sonnet-5", "max_tokens": 50,
                   "messages": [{"role": "user", "content": "hi"}]}),
-    "gemini":   ("/v1beta/models/gemini-3.5-flash:generateContent", {"x-goog-api-key": "AIzaX"},
+    "gemini":   ("/v1beta/models/gemini-3.8-flash:generateContent", {"x-goog-api-key": "AIzaX"},
                  {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}),
     "deepseek": ("/chat/completions", {"Authorization": "Bearer sk-x"},
-                 {"model": "deepseek-v4-flash", "messages": [{"role": "user", "content": "hi"}]}),
+                 {"model": "deepseek-v4-flash-vision-exp", "messages": [{"role": "user", "content": "hi"}]}),
     "mistral":  ("/v1/chat/completions", {"Authorization": "Bearer anykey"},
                  {"model": "mistral-medium-latest", "messages": [{"role": "user", "content": "hi"}]}),
     "ollama":   ("/v1/chat/completions", {},
                  {"model": "qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]}),
     "lm-studio": ("/v1/chat/completions", {},
-                  {"model": "qwen/qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]}),
+                  {"model": "qwen/qwen3.5-2b", "messages": [{"role": "user", "content": "hi"}]}),
 }
 
 
@@ -349,6 +349,20 @@ class TestDeepSeek:
                       headers={"Authorization": "Bearer nope"})
         assert r.status_code == 401
 
+    IMAGE_MESSAGES: ClassVar[list] = [{"role": "user", "content": [
+        {"type": "text", "text": "what is this"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ"}}]}]
+
+    def test_image_to_a_text_model_400(self, server):
+        r = self.post(server, {"model": "deepseek-v4-flash", "messages": self.IMAGE_MESSAGES})
+        assert r.status_code == 400
+        assert r.json()["error"]["message"] == "This model does not support image"
+
+    def test_image_to_the_vision_model_200(self, server):
+        r = self.post(server, {"model": "deepseek-v4-flash-vision-exp",
+                               "messages": self.IMAGE_MESSAGES})
+        assert r.status_code == 200
+
     def test_alias_v1_path(self, server):
         r = _post(server.base_url + "/v1/chat/completions", headers=self.GOOD,
                           json={"model": "deepseek-chat", "messages": [{"role": "user", "content": "x"}]})
@@ -491,7 +505,7 @@ class TestOllama:
 class TestLMStudio:
     def test_v1_chat_id_shape_and_powered_by(self, server):
         r = _post(server.base_url + "/v1/chat/completions",
-                          json={"model": "qwen/qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]})
+                          json={"model": "qwen/qwen3.5-2b", "messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 200
         assert r.headers.get("X-Powered-By") == "Express"
         import re
@@ -499,19 +513,19 @@ class TestLMStudio:
 
     def test_no_auth_needed(self, server):
         r = _post(server.base_url + "/v1/chat/completions",
-                          json={"model": "qwen/qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]})
+                          json={"model": "qwen/qwen3.5-2b", "messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 200
 
     def test_v0_surface_has_stats(self, server):
         r = _post(server.base_url + "/api/v0/chat/completions",
-                          json={"model": "qwen/qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]})
+                          json={"model": "qwen/qwen3.5-2b", "messages": [{"role": "user", "content": "hi"}]})
         j = r.json()
         assert j["stats"]["stop_reason"] in ("eosFound", "maxPredictedTokensReached")
         assert j["model_info"] and j["runtime"]
 
     def test_wrong_route_returns_200_with_error(self, server):
         r = _post(server.base_url + "/chat/completions",
-                          json={"model": "qwen/qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]})
+                          json={"model": "qwen/qwen3.5-2b", "messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 200
         assert "Unexpected endpoint or method" in r.json()["error"]
 

@@ -66,6 +66,18 @@ def drain(generator):
         return results, stop.value
 
 
+def file_status(results, summary):
+    if summary.range_status == "skipped":
+        return "skipped"
+    usable = sum(1 for r in results if r.success in ("ok", "skipped"))
+    failed = sum(1 for r in results if r.success not in ("ok", "skipped"))
+    if usable == 0:
+        return "processing_failure"
+    if failed > 0 or summary.range_status == "failure":
+        return "partial_processing_failure"
+    return "ok"
+
+
 PIPELINE_CLASSES = {
     "static": (StaticImagePipeline, PageRangeSelector),
     "document": (DocumentPipeline, PageRangeSelector),
@@ -148,8 +160,8 @@ def test_plain_image_yields_one_frame_regardless_of_configured_range(tmp_path):
     results, summary = run_pipeline("static", png, tmp_path / "out", range_string="5-10")
 
     assert [(r.page_number, r.success) for r in results] == [(1, Status.OK.value)]
-    assert summary.final_aggregate_status == Status.OK.value
-    assert summary.applied_range_string == "1"
+    assert file_status(results, summary) == "ok"
+    assert summary.page_range == "1"
     assert (tmp_path / "out" / "1_photo_page_1.jpg").exists()
 
 
@@ -160,8 +172,8 @@ def test_multipage_tiff_honours_the_image_range(tmp_path):
     results, summary = run_pipeline("static", tiff, tmp_path / "out", range_string="2")
 
     assert [(r.page_number, r.success) for r in results] == [(2, Status.OK.value)]
-    assert summary.total_discovered_pages == 3
-    assert summary.final_aggregate_status == Status.OK.value
+    assert summary.total_pages == 3
+    assert file_status(results, summary) == "ok"
     saved = sorted(p.name for p in (tmp_path / "out").glob("*.jpg"))
     assert saved == ["1_scan_page_2.jpg"]
 
@@ -177,8 +189,8 @@ def test_pdf_page_cap_truncates_and_reports_truncated(tmp_path):
     assert [(r.page_number, r.success) for r in results] == [
         (1, Status.OK.value), (2, Status.OK.value),
     ]
-    assert summary.range_status_code == RangeStatus.TRUNCATED.value
-    assert summary.total_discovered_pages == 5
+    assert summary.range_status == RangeStatus.TRUNCATED.value
+    assert summary.total_pages == 5
 
 
 def test_giant_pdf_page_never_produces_output_beyond_max_dimension(tmp_path):
@@ -186,7 +198,7 @@ def test_giant_pdf_page_never_produces_output_beyond_max_dimension(tmp_path):
 
     results, summary = run_pipeline("document", pdf, tmp_path / "out", PDF_SCALE=4)
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     with Image.open(tmp_path / "out" / results[0].output_filename) as rendered:
         assert max(rendered.size) <= MAX_DIMENSION
 
@@ -227,7 +239,7 @@ def test_pdf_rotate_flag_is_honored_in_the_render(
 
     results, summary = run_pipeline("document", pdf, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert [(r.page_number, r.success) for r in results] == [(1, Status.OK.value)]
     with Image.open(tmp_path / "out" / results[0].output_filename) as rendered:
         assert rendered.size == expected_size
@@ -282,7 +294,7 @@ def test_exif_orientation_direction_is_baked_into_the_pixels(
 
     results, summary = run_pipeline("static", still, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert [(r.page_number, r.success) for r in results] == [(1, Status.OK.value)]
     with Image.open(tmp_path / "out" / results[0].output_filename) as saved:
         assert saved.size == expected_size
@@ -296,7 +308,7 @@ def test_image_without_orientation_tag_stays_untouched(tmp_path, fmt):
 
     results, summary = run_pipeline("static", still, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert "outside the standard 1-8 range" not in results[0].comment
     with Image.open(tmp_path / "out" / results[0].output_filename) as saved:
         assert saved.size == (64, 48)
@@ -314,7 +326,7 @@ def test_invalid_exif_orientation_warns_and_keeps_image_as_stored(
 
     results, summary = run_pipeline("static", still, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert [(r.page_number, r.success) for r in results] == [(1, Status.OK.value)]
     assert (f"EXIF orientation {orientation} is outside the standard 1-8 range"
             in results[0].comment)
@@ -346,7 +358,7 @@ def test_animated_webp_exif_orientation_reaches_every_frame(tmp_path):
     results, summary = run_pipeline(
         "animation", webp, tmp_path / "out", ANIMATION_SCENE_SENSITIVITY=0.0)
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert [r.success for r in results] == [Status.OK.value] * 2
     for result in results:
         with Image.open(tmp_path / "out" / result.output_filename) as saved:
@@ -370,8 +382,8 @@ def test_mpo_yields_exactly_one_output_the_photo_not_the_gain_map(tmp_path):
     results, summary = run_pipeline("static", mpo, tmp_path / "out")
 
     assert [(r.page_number, r.success) for r in results] == [(1, Status.OK.value)]
-    assert summary.total_discovered_pages == 1
-    assert summary.final_aggregate_status == Status.OK.value
+    assert summary.total_pages == 1
+    assert file_status(results, summary) == "ok"
     assert "MPO auxiliary image ignored" in results[0].comment
     saved_names = sorted(p.name for p in (tmp_path / "out").glob("*.jpg"))
     assert saved_names == ["1_photo_page_1.jpg"]
@@ -391,8 +403,8 @@ def test_missing_pdf_engine_degrades_to_a_per_file_failure(tmp_path, monkeypatch
 
     results, summary = run_pipeline("document", pdf, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "Library failure" in summary.final_aggregate_comment
+    assert file_status(results, summary) == "processing_failure"
+    assert "Library failure" in summary.file_to_jpegs_comment
     assert len(results) == 1
 
 
@@ -403,8 +415,8 @@ def test_missing_video_engine_degrades_to_a_per_file_failure(tmp_path, monkeypat
 
     results, summary = run_pipeline("video", video, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "PyAV Missing" in summary.final_aggregate_comment
+    assert file_status(results, summary) == "processing_failure"
+    assert "PyAV Missing" in summary.file_to_jpegs_comment
     assert len(results) == 1
 
 
@@ -422,9 +434,22 @@ def test_animation_budget_compresses_and_static_scenes_are_skipped(tmp_path):
     assert statuses.count(Status.OK.value) == 3
     assert "Scene static" in next(r.comment for r in results if r.success == Status.SKIPPED.value)
 
-    assert summary.final_aggregate_status == Status.OK.value
-    assert "Compressed:" in summary.final_aggregate_comment
-    assert summary.range_status_code == RangeStatus.TRUNCATED.value
+    assert file_status(results, summary) == "ok"
+    assert "Compressed:" in summary.file_to_jpegs_comment
+    assert summary.range_status == RangeStatus.OK.value
+
+
+def test_animation_compression_keeps_a_range_shortfall(tmp_path):
+    gif = make_gif(tmp_path / "anim.gif")
+
+    _, summary = run_pipeline(
+        "animation", gif, tmp_path / "out", range_string="3-40",
+        ANIMATION_TARGET_TOTAL_FRAMES=4,
+    )
+
+    assert "Compressed:" in summary.file_to_jpegs_comment
+    assert "Truncated to limit" in summary.file_to_jpegs_comment
+    assert summary.range_status == RangeStatus.TRUNCATED.value
 
 
 
@@ -437,7 +462,7 @@ def test_video_summary_mode_extracts_the_configured_total(tmp_path):
     )
 
     assert len(results) == 3
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert all(r.success == Status.OK.value for r in results)
 
 
@@ -550,7 +575,7 @@ def test_video_rotation_flag_is_baked_into_the_pixels(
 
     results, summary = run_pipeline("video", video, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert results and all(r.success == Status.OK.value for r in results)
     for result in results:
         with Image.open(tmp_path / "out" / result.output_filename) as saved:
@@ -563,7 +588,7 @@ def test_video_without_rotation_flag_stays_untouched(tmp_path):
 
     results, summary = run_pipeline("video", video, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     for result in results:
         with Image.open(tmp_path / "out" / result.output_filename) as saved:
             assert saved.size == (64, 48)
@@ -601,7 +626,7 @@ def test_truncated_gif_never_crashes_and_keeps_what_was_extracted(tmp_path):
     results, summary = drain_never_raises("animation", gif, tmp_path / "out")
 
     assert summary is not None
-    assert summary.final_aggregate_status != Status.OK.value
+    assert file_status(results, summary) != "ok"
     saved_ok = [r for r in results if r.success == Status.OK.value]
     assert saved_ok, "pipeline extracted nothing before the tear"
     for result in saved_ok:
@@ -695,7 +720,7 @@ def test_missing_pts_packets_are_bypassed_with_a_count(tmp_path, monkeypatch):
 
     assert [r.success for r in results] == [Status.OK.value]
     assert "Bypassed 2 corrupted frames" in results[0].comment
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
 
 
 def test_targets_stop_at_the_last_real_frame_not_the_header_duration(tmp_path, monkeypatch):
@@ -720,7 +745,7 @@ def test_targets_stop_at_the_last_real_frame_not_the_header_duration(tmp_path, m
     assert "Extracted exactly at 00:00:01.90" in results[1].comment
     assert results[0].capture_seconds == pytest.approx(0.0)
     assert results[1].capture_seconds == pytest.approx(1.9)
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
 
 
 def test_target_past_the_final_frame_captures_the_final_frame(tmp_path, monkeypatch):
@@ -744,7 +769,7 @@ def test_target_past_the_final_frame_captures_the_final_frame(tmp_path, monkeypa
     assert "past the final frame" in results[1].comment
     assert "extracted the final frame at 00:00:00.50" in results[1].comment
     assert results[1].capture_seconds == pytest.approx(0.5)
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
 
 
 def test_approximated_duration_is_flagged_in_the_summary(tmp_path, monkeypatch):
@@ -761,8 +786,8 @@ def test_approximated_duration_is_flagged_in_the_summary(tmp_path, monkeypatch):
         VIDEO_SUMMARY_TARGET_TOTAL_FRAMES=1,
     )
 
-    assert summary.final_aggregate_status == Status.OK.value
-    assert "Duration approximated to 00:00:02.00" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "ok"
+    assert "Duration approximated to 00:00:02.00" in summary.file_to_jpegs_comment
 
 
 def test_corrupt_timebase_headers_abort_only_that_file(tmp_path, monkeypatch):
@@ -781,8 +806,8 @@ def test_corrupt_timebase_headers_abort_only_that_file(tmp_path, monkeypatch):
 
     _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "Corrupted video timebase headers" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "processing_failure"
+    assert "Corrupted video timebase headers" in summary.file_to_jpegs_comment
 
 
 def test_zero_timebase_fraction_aborts_only_that_file(tmp_path, monkeypatch):
@@ -795,8 +820,8 @@ def test_zero_timebase_fraction_aborts_only_that_file(tmp_path, monkeypatch):
 
     _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "Zero timebase fraction" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "processing_failure"
+    assert "Zero timebase fraction" in summary.file_to_jpegs_comment
 
 
 def test_unreadable_container_aborts_only_that_file(tmp_path, monkeypatch):
@@ -814,8 +839,8 @@ def test_unreadable_container_aborts_only_that_file(tmp_path, monkeypatch):
 
     _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "PyAV could not read container" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "processing_failure"
+    assert "PyAV could not read container" in summary.file_to_jpegs_comment
 
 
 def test_zero_valid_packets_is_a_per_file_metadata_error(tmp_path, monkeypatch):
@@ -828,8 +853,8 @@ def test_zero_valid_packets_is_a_per_file_metadata_error(tmp_path, monkeypatch):
 
     _results, summary = run_pipeline("video", fake_clip(tmp_path), tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "Metadata error" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "processing_failure"
+    assert "Metadata error" in summary.file_to_jpegs_comment
 
 
 
@@ -859,7 +884,7 @@ def test_seek_decode_error_recovers_once_with_a_fresh_decoder(tmp_path, monkeypa
     )
 
     assert len(opens) == 3
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(results, summary) == "ok"
     assert len(results) == 1 and results[0].success == Status.OK.value
     assert "Recovered with a fresh decoder after a seek error" in results[0].comment
 
@@ -883,7 +908,7 @@ def test_seek_decode_error_twice_degrades_per_frame_as_before(tmp_path, monkeypa
     )
 
     assert len(opens) == 3
-    assert summary.final_aggregate_status == Status.FAILURE.value
+    assert file_status(results, summary) == "processing_failure"
     assert results[0].success == Status.FAILURE.value
     assert "Corrupted video packet" in results[0].comment
     assert "Recovered" not in results[0].comment
@@ -907,9 +932,9 @@ def test_range_truncation_warning_reaches_the_summary_comment(
         kind, media, tmp_path / "out", range_string=range_string
     )
 
-    assert summary.final_aggregate_status == Status.OK.value
-    assert summary.range_status_code == RangeStatus.TRUNCATED.value
-    assert "Truncated to limit" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "ok"
+    assert summary.range_status == RangeStatus.TRUNCATED.value
+    assert "Truncated to limit" in summary.file_to_jpegs_comment
 
 
 
@@ -930,8 +955,8 @@ def test_executable_wearing_an_image_extension_fails_cleanly(tmp_path):
 
     results, summary = run_pipeline("static", disguised, out)
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "cannot identify image file" in summary.final_aggregate_comment
+    assert file_status(results, summary) == "processing_failure"
+    assert "cannot identify image file" in summary.file_to_jpegs_comment
     assert len(results) == 1
     assert results[0].success == Status.FAILURE.value
     assert list(out.iterdir()) == []
@@ -944,8 +969,8 @@ def test_faked_image_header_over_an_executable_fails_cleanly(tmp_path):
 
     _results, summary = run_pipeline("static", disguised, out)
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "cannot identify image file" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "processing_failure"
+    assert "cannot identify image file" in summary.file_to_jpegs_comment
     assert list(out.iterdir()) == []
 
 
@@ -956,8 +981,8 @@ def test_supported_extension_cannot_smuggle_an_unsupported_format(tmp_path):
 
     _results, summary = run_pipeline("static", disguised, out)
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "cannot identify image file" in summary.final_aggregate_comment
+    assert file_status(_results, summary) == "processing_failure"
+    assert "cannot identify image file" in summary.file_to_jpegs_comment
     assert list(out.iterdir()) == []
 
 
@@ -983,8 +1008,8 @@ def test_no_pipeline_leaks_the_long_path_prefix_when_the_decode_fails(
 
     results, summary = run_pipeline(kind, junk, out)
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert LONG_PATH_PREFIX not in summary.final_aggregate_comment
+    assert file_status(results, summary) == "processing_failure"
+    assert LONG_PATH_PREFIX not in summary.file_to_jpegs_comment
     for page in results:
         assert LONG_PATH_PREFIX not in page.comment
 
@@ -995,7 +1020,7 @@ def test_the_cleaned_message_still_names_the_file_the_user_recognises(tmp_path):
 
     _results, summary = run_pipeline("static", junk, tmp_path / "out")
 
-    comment = summary.final_aggregate_comment
+    comment = summary.file_to_jpegs_comment
     assert LONG_PATH_PREFIX not in comment
     assert "cannot identify image file" in comment
     assert str(junk.resolve()) in comment
@@ -1010,9 +1035,9 @@ def test_a_blocked_output_path_never_leaks_the_prefix_either(tmp_path):
 
     results, summary = run_pipeline("static", source, out)
 
-    assert summary.final_aggregate_status == Status.FAILURE.value
-    assert "OS/Disk save error" in summary.final_aggregate_comment
-    assert LONG_PATH_PREFIX not in summary.final_aggregate_comment
+    assert file_status(results, summary) == "processing_failure"
+    assert "OS/Disk save error" in summary.file_to_jpegs_comment
+    assert LONG_PATH_PREFIX not in summary.file_to_jpegs_comment
     assert all(LONG_PATH_PREFIX not in page.comment for page in results)
 
 
@@ -1024,7 +1049,7 @@ def test_payload_appended_to_a_real_image_never_reaches_the_output(tmp_path):
 
     _results, summary = run_pipeline("static", source, out)
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(_results, summary) == "ok"
     written = sorted(out.iterdir())
     assert len(written) == 1
     assert b"PAYLOAD_MUST_NOT_SURVIVE" not in written[0].read_bytes()
@@ -1046,5 +1071,5 @@ def test_wrong_extension_still_converts_when_the_contents_are_supported(
 
     _results, summary = run_pipeline("static", mislabelled, out)
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert file_status(_results, summary) == "ok"
     assert len(list(out.iterdir())) == 1

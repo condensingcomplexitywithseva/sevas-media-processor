@@ -1,35 +1,49 @@
 
-<div style="max-width: 600px; padding-top: 0px;">
-    <div style="display: flex; flex-direction: column; gap: 16px; align-items: flex-start;">
-        <button onclick="window.exportDatabase()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px;">
+<div class="ui-export-column">
+    <div class="ui-export-stack" style="display: flex;">
+        <button class="ui-export-button" onclick="window.exportDatabase()">
             📊 <span data-i18n="btn_export_db">Export Last Run's Database to CSV/XLSX</span>
         </button>
 
-        <div id="export-db-result" style="display:none;">
+        <div class="ui-result" id="export-db-result" style="display: none;" role="status" aria-live="polite">
+            <div id="export-db-status" class="hint"></div>
+            <div id="export-db-reason" class="hint"></div>
+            <div id="export-db-saved" class="hint"></div>
+            <div id="export-db-limits" class="hint"></div>
+            <div class="ui-recovery-actions" id="export-db-actions" style="display: none;">
+                <button type="button" class="btn-default" onclick="window.exportDatabase(true)" data-i18n="btn_retry_export">Retry export</button>
+                <button type="button" class="btn-default" onclick="window.saveReportsElsewhere()" data-i18n="btn_export_elsewhere">Save reports elsewhere</button>
+            </div>
+            <details id="export-db-details">
+                <summary class="hint ui-disclosure" data-i18n="export_file_details">File details</summary>
+                <ul id="export-db-files" class="hint ui-file-list"></ul>
+                <div id="export-db-location">
             <span class="hint" data-i18n="lbl_exported_to">Exported to:</span>
-            <code id="export-db-path" style="display:inline-block; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;"></code>
-            <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle;" onclick='copyTextToClipboard(document.getElementById("export-db-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+            <code class="ui-location" id="export-db-path" style="display: inline-block;"></code>
+            <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("export-db-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+                </div>
+            </details>
         </div>
 
-        <button onclick="window.exportLogs()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px;">
+        <button class="ui-export-button" onclick="window.exportLogs()">
             📄 <span data-i18n="btn_export_log">Export This Session's Log</span>
         </button>
         <div id="export-log-result" style="display:none;">
             <span class="hint" data-i18n="lbl_exported_to">Exported to:</span>
-            <code id="export-log-path" style="display:inline-block; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;"></code>
-            <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle;" onclick='copyTextToClipboard(document.getElementById("export-log-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+            <code class="ui-location" id="export-log-path" style="display: inline-block;"></code>
+            <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("export-log-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
         </div>
 
-        <button onclick="window.openLogsFolder()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px;">
+        <button class="ui-export-button" onclick="window.openLogsFolder()">
             🔍 <span data-i18n="btn_all_logs_folder">All System Logs from Previous Sessions</span>
         </button>
 
         <div>
-            <code id="logs-path-display" style="display:inline-block; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;">{{ log_path }}</code>
-            <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle;" onclick='copyTextToClipboard(document.getElementById("logs-path-display").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+            <code class="ui-location" id="logs-path-display" style="display: inline-block;">{{ log_path }}</code>
+            <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("logs-path-display").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
         </div>
 
-        <button onclick="window.clearLogs()" style="padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid red; color: red; border-radius: 4px;">
+        <button class="ui-destructive-button" onclick="window.clearLogs()">
             🗑️ <span data-i18n="btn_clear_logs">Clear System Logs</span>
         </button>
     </div>
@@ -45,41 +59,222 @@
         fetch('/api/export/open_logs_folder', { method: 'POST' })
             .then(response => response.json())
             .then(data => {
+                if (data.status === 'success') window.clearNotice('logs-folder');
                 if (data.status !== 'success') {
-                    let errorMessage = data.message_key ? window.getT(data.message_key, data.message) : data.message;
-                    window.showToast(errorMessage, true);
+                    window.notice(Object.assign(window.serverNotice(data), {id: 'logs-folder', summaryKey: 'notice_action_failed'}));
                 }
             })
-            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+            .catch(error => window.notice({id: 'logs-folder', key: 'notice_action_failed', detail: String(error)}));
     };
 
-    window.exportDatabase = function() {
-        fetch('/api/export/database', { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    window.showToast((window.getT('alert_db_success', 'Database successfully exported to:') + ' ') + data.path);
-                    window.showExportResult('export-db-result', 'export-db-path', data.path);
-                } else {
-                    let errorMessage = data.message_key ? window.getT(data.message_key, data.message) : data.message;
-                    window.showToast((window.getT('alert_db_fail', 'Failed to export database:') + ' ') + errorMessage, true);
-                }
-            })
-            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+    function exportReportName(file) {
+        if (file.format === 'xlsx') {
+            return window.getT(file.report === 'Recovery workbook' ? 'export_recovery_workbook' : 'export_workbook') + ' (.xlsx)';
+        }
+        const labels = {
+            'Results': 'export_report_results',
+            'Master Registry': 'export_report_registry',
+            'Page Log': 'export_report_pages',
+            'LLM Requests': 'export_report_requests',
+            'LLM Answers': 'export_report_answers'
+        };
+        const name = labels[file.report] ? window.getT(labels[file.report]) : file.report || window.getT('export_report_unknown');
+        return file.format === 'csv' ? name + ' (.csv)' : name;
+    }
+
+    function exportFailureMessage(data) {
+        const types = [...new Set((data.failed || []).map(exportReportName))];
+        return types.length
+            ? window.getT('export_failed_types').replace('{reports}', types.join('; '))
+            : window.getT('export_partial');
+    }
+
+    function exportFailureReasons(data) {
+        const reasons = [...new Set((data.failed || []).map(file =>
+            window.getT('export_error_' + file.category, file.error || window.getT('export_error_write_failed'))))];
+        return reasons.join(' ');
+    }
+
+    function exportHasInventory(data) {
+        if (data.status === 'pending') return false;
+        return data.export_state ? data.export_state === 'completed' :
+            Array.isArray(data.saved) || Array.isArray(data.failed);
+    }
+
+    function exportMessage(data) {
+        if (data.status === 'pending') return {key: 'export_saving'};
+        if (data.status === 'success') return {key: 'export_complete'};
+        if (exportHasInventory(data)) {
+            return {textForLocale: () => exportFailureMessage(data) + '\n\n' + exportFailureReasons(data)};
+        }
+        return Object.assign(window.serverNotice(data), {path: ''});
+    }
+
+    function exportSavedMessage(files) {
+        const workbooks = files.filter(file => file.format === 'xlsx').map(exportReportName);
+        const csvCount = files.filter(file => file.format === 'csv').length;
+        const types = [...new Set(workbooks)];
+        if (csvCount) types.push(window.getT('export_csv_count').replace('{count}', String(csvCount)));
+        return types.length ? window.getT('export_saved') + ': ' + types.join('; ') : window.getT('export_none_saved');
+    }
+
+    window.exportOutcome = null;
+    let exportBusy = false;
+    let lastExportRevision = 0;
+    let deferredAutomaticExport = null;
+    let manualUnconfirmed = false;
+    let runStarting = false;
+    function acceptExportOutcome(data) {
+        if (Number.isSafeInteger(data.export_revision)) {
+            if (data.export_revision <= lastExportRevision) return false;
+            lastExportRevision = data.export_revision;
+        }
+        window.showExportOutcome(data);
+        return true;
+    }
+    function flushAutomaticExport() {
+        const deferred = deferredAutomaticExport;
+        deferredAutomaticExport = null;
+        if (deferred) window.receiveAutomaticExport(deferred);
+    }
+    window.beginAutomaticExportRun = function() { runStarting = true; };
+    window.finishAutomaticExportRun = function(barrier) {
+        if (Number.isSafeInteger(barrier)) {
+            lastExportRevision = Math.max(lastExportRevision, barrier);
+            manualUnconfirmed = false;
+        }
+        runStarting = false;
+        flushAutomaticExport();
+    };
+    window.receiveAutomaticExport = function(data) {
+        if (exportBusy || runStarting) {
+            if (!deferredAutomaticExport || data.export_revision > deferredAutomaticExport.export_revision) {
+                deferredAutomaticExport = data;
+            }
+        } else if (!manualUnconfirmed) acceptExportOutcome(data);
+    };
+
+    window.showExportOutcome = function(data) {
+        window.exportOutcome = data;
+        const inventory = exportHasInventory(data);
+        const message = exportMessage(data);
+        if (data.status === 'error') {
+            window.notice(Object.assign({}, message, {id: 'export',
+                summaryKey: inventory ? 'notice_reports_failed' :
+                    (data.export_state === 'unknown' ? 'notice_export_unknown' : 'notice_export_incomplete'),
+                actions: [{key: 'btn_details', run: () => window.switchTab('exports')}]}));
+        } else window.clearNotice('export');
+        const panel = document.getElementById('export-db-result');
+        panel.style.display = 'block';
+        document.getElementById('export-db-path').textContent = data.path || '';
+        const status = document.getElementById('export-db-status');
+        const failed = data.status === 'error';
+        status.className = failed ? 'export-error' : 'hint';
+        window.renderMessage(status, failed && inventory ?
+            {textForLocale: () => exportFailureMessage(data)} : message);
+        window.renderMessage(document.getElementById('export-db-reason'), inventory ?
+            {textForLocale: () => exportFailureReasons(data)} : {text: data.detail || ''});
+        document.getElementById('export-db-saved').textContent = inventory ?
+            exportSavedMessage(data.saved || []) : '';
+        document.getElementById('export-db-limits').textContent =
+            (data.notices || []).length && (data.saved || []).some(file => file.format === 'xlsx')
+                ? window.getT('export_limits_notice') : '';
+        document.getElementById('export-db-details').style.display = inventory && data.status !== 'pending' ? 'block' : 'none';
+        document.getElementById('export-db-location').style.display =
+            data.path && (data.saved || []).length ? 'block' : 'none';
+        const list = document.getElementById('export-db-files');
+        list.replaceChildren();
+        for (const file of data.saved || []) {
+            const item = document.createElement('li');
+            item.textContent = window.getT('export_saved') + ': ' + file.path.split(/[\\/]/).pop();
+            item.title = file.path;
+            list.appendChild(item);
+        }
+        for (const file of data.failed || []) {
+            const item = document.createElement('li');
+            item.textContent = window.getT('export_not_saved') + ': ' + exportReportName(file) + ' - ' +
+                window.getT('export_error_' + file.category, file.error || window.getT('export_error_write_failed'));
+            item.title = file.error || window.getT('export_error_' + file.category, window.getT('export_error_write_failed'));
+            list.appendChild(item);
+        }
+        for (const notice of data.notices || []) {
+            const item = document.createElement('li');
+            item.textContent = notice;
+            list.appendChild(item);
+        }
+        document.getElementById('export-db-actions').style.display = data.recovery_id ? 'flex' : 'none';
+        const runNotice = document.getElementById('export-run-notice');
+        if (runNotice) runNotice.style.display = data.status === 'error' ? 'block' : 'none';
+        return true;
+    };
+
+    window.exportDatabase = async function(retry = false, destination = null) {
+        if (exportBusy) return;
+        const previous = window.exportOutcome;
+        if (retry && (!previous || !previous.recovery_id)) return;
+        exportBusy = true;
+        document.getElementById('export-db-details').open = false;
+        const payload = {};
+        if (retry) payload.recovery_id = previous.recovery_id;
+        if (destination) payload.destination = destination;
+        else if (retry && previous.path) payload.destination = previous.path;
+        window.showExportOutcome({ status: 'pending', message_key: 'export_saving',
+            message: window.getT('export_saving'), saved: [], failed: [] });
+        try {
+            const response = await fetch('/api/export/database', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (retry && data.export_state === 'refused' && data.message_key === 'err_export_run_active') {
+                data.recovery_id = payload.recovery_id;
+                data.path = payload.destination || '';
+            }
+            manualUnconfirmed = false;
+            const accepted = acceptExportOutcome(data);
+            if (accepted && data.status !== 'success') {
+                window.appAlert(exportMessage(data));
+            }
+        } catch (error) {
+            manualUnconfirmed = true;
+            const unknown = {status: 'error', export_state: 'unknown',
+                message_key: 'err_export_outcome_unknown', detail: String(error),
+                recovery_id: retry ? payload.recovery_id : null,
+                path: retry ? payload.destination || '' : ''};
+            window.showExportOutcome(unknown);
+            window.appAlert(exportMessage(unknown));
+        } finally {
+            exportBusy = false;
+            flushAutomaticExport();
+        }
+    };
+
+    window.saveReportsElsewhere = async function() {
+        if (exportBusy || !window.exportOutcome || !window.exportOutcome.recovery_id) return;
+        if (!window.pywebview || !window.pywebview.api) {
+            window.reportFailure('export-picker', {key: 'export_picker_unavailable'});
+            return;
+        }
+        try {
+            const destination = await window.pywebview.api.browse_folder();
+            if (destination) { window.clearNotice('export-picker'); await window.exportDatabase(true, destination); }
+        } catch (error) {
+            window.reportFailure('export-picker', {key: 'err_export_picker_failed', detail: String(error)});
+        }
     };
 
     window.clearLogs = async function() {
-        if (!await window.appConfirm(window.getT('confirm_clear_logs', 'Are you sure you want to delete all historical logs? The active log for the current session will be kept.'))) return;
+        if (!await window.appConfirm({key: 'confirm_clear_logs'})) return;
         fetch('/api/export/clear_logs', { method: 'POST' })
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    window.showToast(window.getT('toast_logs_cleared', 'Historical logs have been cleared.'));
+                    window.clearNotice('logs-clear');
+                    window.notice({surface: 'toast', key: 'toast_logs_cleared'});
                 } else {
-                    window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + data.message, true);
+                    window.notice(Object.assign(window.serverNotice(data), {id: 'logs-clear', summaryKey: 'notice_action_failed'}));
                 }
             })
-            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+            .catch(error => window.notice({id: 'logs-clear', key: 'notice_action_failed', detail: String(error)}));
     };
 
     window.exportLogs = function() {
@@ -87,13 +282,13 @@
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    window.showToast((window.getT('alert_log_success', 'System log exported to:') + ' ') + data.path);
+                    window.clearNotice('logs');
+                    window.notice({surface: 'toast', key: 'notice_log_saved', args: {path: data.path}});
                     window.showExportResult('export-log-result', 'export-log-path', data.path);
                 } else {
-                    let errorMessage = data.message_key ? window.getT(data.message_key, data.message) : data.message;
-                    window.showToast((window.getT('alert_log_fail', 'Failed to export the system log:') + ' ') + errorMessage, true);
+                    window.notice(Object.assign(window.serverNotice(data), {id: 'logs', summaryKey: 'notice_log_failed'}));
                 }
             })
-            .catch(error => window.showToast((window.getT('alert_error', 'An error occurred') + ': ') + error, true));
+            .catch(error => window.notice({id: 'logs', key: 'notice_action_failed', detail: String(error)}));
     };
 </script>

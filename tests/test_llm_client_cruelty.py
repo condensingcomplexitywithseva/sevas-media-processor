@@ -13,7 +13,6 @@ if str(TESTS) not in sys.path:
 from PIL import Image
 
 from fake_llm.harness import wire_provider  # noqa: F401
-from schemas import Status
 
 
 @pytest.fixture
@@ -29,7 +28,7 @@ def usage(completion_tokens=0):
 
 
 
-def test_openai_content_filter_refusal_fails_the_chunk_gracefully(wire_provider, jpeg):
+def test_openai_content_filter_refusal_fails_the_request_gracefully(wire_provider, jpeg):
     srv, client = wire_provider("openai", HALT_ON_LLM_PARSE_ERROR=False)
     srv.queue(json={
         "id": "chatcmpl-fake", "object": "chat.completion",
@@ -44,14 +43,14 @@ def test_openai_content_filter_refusal_fails_the_chunk_gracefully(wire_provider,
         "usage": usage(),
     })
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.LLM_FAILED.value
-    assert result.error, "the refusal must be surfaced, not swallowed"
+    assert [o.status for o in outcomes] == ["provider_reply_parse_error"]
+    assert outcomes[0].error, "the refusal must be surfaced, not swallowed"
     assert srv.requests, "the refusal must have come over the wire"
 
 
-def test_claude_refusal_stop_reason_fails_the_chunk_gracefully(wire_provider, jpeg):
+def test_claude_refusal_stop_reason_fails_the_request_gracefully(wire_provider, jpeg):
     srv, client = wire_provider("claude", HALT_ON_LLM_PARSE_ERROR=False)
     srv.queue(json={
         "id": "msg_fake", "type": "message", "role": "assistant",
@@ -63,14 +62,14 @@ def test_claude_refusal_stop_reason_fails_the_chunk_gracefully(wire_provider, jp
         "usage": {"input_tokens": 50, "output_tokens": 0},
     })
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.LLM_FAILED.value
-    assert result.error, "the refusal must be surfaced, not swallowed"
+    assert [o.status for o in outcomes] == ["provider_reply_parse_error"]
+    assert outcomes[0].error, "the refusal must be surfaced, not swallowed"
 
 
 
-def test_empty_choices_array_fails_the_chunk_gracefully(wire_provider, jpeg):
+def test_empty_choices_array_fails_the_request_gracefully(wire_provider, jpeg):
     srv, client = wire_provider("openai", HALT_ON_LLM_PARSE_ERROR=False)
     srv.queue(json={
         "id": "chatcmpl-fake", "object": "chat.completion",
@@ -78,10 +77,10 @@ def test_empty_choices_array_fails_the_chunk_gracefully(wire_provider, jpeg):
         "choices": [], "usage": usage(),
     })
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.LLM_FAILED.value
-    assert result.error
+    assert [o.status for o in outcomes] == ["provider_reply_parse_error"]
+    assert outcomes[0].error
 
 
 
@@ -95,10 +94,10 @@ def test_429_with_retry_after_recovers_on_the_next_attempt(wire_provider, jpeg):
         headers={"Retry-After": "2"},
     )
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.OK.value, result.error
-    assert "quick brown fox" in result.answer.lower()
+    assert [o.status for o in outcomes] == ["ok"], outcomes[0].error
+    assert "quick brown fox" in outcomes[0].raw_answer.lower()
     assert len(srv.requests) == 2, "exactly one retry after the 429"
 
 
@@ -118,11 +117,11 @@ def test_429_storm_exhausts_retries_with_the_real_body_preserved(wire_provider, 
                      "x-ratelimit-remaining-requests": "0"},
         )
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.LLM_FAILED.value
-    assert "429" in result.error
-    assert "rate_limit_exceeded" in result.error, \
+    assert [o.status for o in outcomes] == ["network_failure"]
+    assert "429" in outcomes[0].error
+    assert "rate_limit_exceeded" in outcomes[0].error, \
         "the provider's own 429 body must survive into the surfaced error"
     assert len(srv.requests) == 2, "both attempts must have hit the server"
 
@@ -147,10 +146,10 @@ def test_mid_download_disconnect_is_retried_then_recovers(wire_provider, jpeg):
                                 LLM_RETRY_SLEEP_SECONDS=0)
     srv.queue(json=FULL_REPLY, truncate_body_after=40)
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.OK.value, result.error
-    assert "quick brown fox" in result.answer.lower()
+    assert [o.status for o in outcomes] == ["ok"], outcomes[0].error
+    assert "quick brown fox" in outcomes[0].raw_answer.lower()
     assert len(srv.requests) == 2, "the torn download must have been retried"
 
 
@@ -160,9 +159,9 @@ def test_persistent_mid_download_disconnect_exhausts_retries(wire_provider, jpeg
     for _ in range(2):
         srv.queue(json=FULL_REPLY, truncate_body_after=40)
 
-    result = client.execute_network_inference([jpeg])
+    outcomes = client.execute_network_inference([(1, jpeg, "")])
 
-    assert result.status == Status.LLM_FAILED.value
-    assert "quick brown fox" not in result.answer.lower(), \
+    assert [o.status for o in outcomes] == ["network_failure"]
+    assert "quick brown fox" not in outcomes[0].raw_answer.lower(), \
         "a torn body must never be passed off as a real answer"
     assert len(srv.requests) == 2

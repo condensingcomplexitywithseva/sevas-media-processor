@@ -13,6 +13,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 README = REPO_ROOT / "README.md"
 REQUIREMENTS = REPO_ROOT / "requirements.txt"
 INSTALL_SCRIPT = REPO_ROOT / "install.ps1"
+VERSION_SOURCE = REPO_ROOT / "src" / "version.py"
+
+README_APP_VERSION = re.compile(r"^Current version: (v\d+(?:\.\d+)+)\s*$", re.M)
+APP_VERSION_LINE = re.compile(r'^APP_VERSION\s*=\s*"(\d+(?:\.\d+)+)"', re.M)
+SETUP_HEADING = "## Initial setup instructions"
+UPDATING_HEADING = "## Updating to a new version"
+VERSION_LABEL = '"Current version"'
 
 README_ENTRY = re.compile(r"^\*   ([A-Za-z0-9_.-]+) \(([0-9][^),]*)", re.M)
 
@@ -103,6 +110,36 @@ def test_readme_versions_match_requirements():
         f"(name: README vs requirements.txt): {wrong}. requirements.txt is "
         "the source of the README's explained list, so "
         "the README follows the pin, never the other way round."
+    )
+
+
+def test_readme_states_the_app_version_the_window_shows():
+    text = README.read_text(encoding="utf-8")
+    readme_hits = README_APP_VERSION.findall(text)
+    assert len(readme_hits) == 1, (
+        f"README.md must carry exactly one 'Current version: vX.Y.Z' line, "
+        f"found {len(readme_hits)}"
+    )
+    source_hit = APP_VERSION_LINE.search(VERSION_SOURCE.read_text(encoding="utf-8"))
+    assert source_hit, "src/version.py no longer declares APP_VERSION"
+    assert readme_hits[0] == f"v{source_hit.group(1)}", (
+        f"README.md says 'Current version: {readme_hits[0]}' but "
+        f"src/version.py has APP_VERSION {source_hit.group(1)}. The README "
+        "follows the code: update the line with every version bump."
+    )
+
+
+def test_the_version_line_sits_near_the_top_where_the_updating_section_says():
+    text = README.read_text(encoding="utf-8")
+    line_at = README_APP_VERSION.search(text)
+    assert line_at is not None
+    setup_at = text.find(SETUP_HEADING)
+    updating_at = text.find(UPDATING_HEADING)
+    assert 0 < setup_at < updating_at, "README headings moved; update the anchors"
+    assert line_at.start() < setup_at, "the Current version line is not near the top"
+    updating_section = text[updating_at:]
+    assert VERSION_LABEL in updating_section, (
+        f"the Updating section no longer quotes {VERSION_LABEL} for the reader to find"
     )
 
 

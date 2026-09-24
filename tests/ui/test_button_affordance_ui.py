@@ -84,7 +84,7 @@ def test_no_disabled_button_ever_looks_clickable(open_page, tmp_path):
 
     page.evaluate(
         """() => {
-            window.runActive = true;
+            window.runState = {...window.runState, phase: 'running'};
             window.updateGlobalControls();
             window.setButtonState(document.getElementById('btn-stop'), true);
         }"""
@@ -101,7 +101,7 @@ def test_no_disabled_button_ever_looks_clickable(open_page, tmp_path):
     assert stopping["btn-start"]["disabled"] is True
     assert stopping["btn-stop"]["disabled"] is True
 
-    page.evaluate("() => { window.runActive = false; window.updateGlobalControls(); }")
+    page.evaluate("() => { window.runState = {...window.runState, phase: 'idle'}; window.updateGlobalControls(); }")
     finished = check("finished")
     assert finished["btn-start"]["disabled"] is False
 
@@ -133,7 +133,7 @@ def test_a_blocked_start_explains_itself_in_every_state(open_page):
 
     page.click("#btn-discard")
     page.wait_for_timeout(300)
-    page.evaluate("() => { window.runActive = true; window.updateGlobalControls(); }")
+    page.evaluate("() => { window.runState = {...window.runState, phase: 'running'}; window.updateGlobalControls(); }")
     running = page.evaluate("() => document.getElementById('btn-start').title")
 
     assert pending and running, "a disabled Start must always carry a reason"

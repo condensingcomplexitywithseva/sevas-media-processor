@@ -442,7 +442,9 @@ SPAWN_HELPER = re.compile(r"_([a-z0-9]+)_path")
 SPAWN_FUNCS = {
     "subprocess": {"Popen", "run", "call", "check_call", "check_output"},
     "os": {"system", "popen", "startfile"},
+    "webbrowser": {"open", "open_new", "open_new_tab", "get"},
 }
+BROWSER_STEM = "browser"
 
 
 def launches_section():
@@ -477,6 +479,10 @@ def _program_stems(text, filename="<snippet>"):
         if not _is_spawn_call(node):
             continue
         assert isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        assert isinstance(node.func.value, ast.Name)
+        if node.func.value.id == "webbrowser":
+            stems.add(BROWSER_STEM)
+            continue
         index = 1 if node.func.attr.startswith("spawn") else 0
         arg = node.args[index] if len(node.args) > index else None
         if isinstance(arg, (ast.List, ast.Tuple)):
@@ -558,8 +564,8 @@ def test_the_page_names_every_program_the_source_launches():
 
 def test_the_launch_extraction_reads_the_page():
     section = launches_section().lower()
-    assert section.strip().split()[0].strip(".:") == "two"
-    assert "notepad" in section and "explorer" in section
+    assert section.strip().split()[0].strip(".:") == "three"
+    assert "notepad" in section and "explorer" in section and BROWSER_STEM in section
 
 
 def test_the_program_stem_sweep_judges_helpers_and_literals():
@@ -569,6 +575,8 @@ def test_the_program_stem_sweep_judges_helpers_and_literals():
         'subprocess.run([r"C:\\Windows\\explorer.exe", "/select," + p])\n'
     )
     assert _program_stems(snippet) == {"notepad", "explorer"}
+    assert _program_stems("import webbrowser\nwebbrowser.open(url)\n") == {BROWSER_STEM}
+    assert _program_stems("import webbrowser\nwebbrowser.get().open_new_tab(url)\n") == {BROWSER_STEM}
 
 
 def test_the_program_stem_sweep_refuses_to_guess():

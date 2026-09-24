@@ -101,7 +101,7 @@ def test_apply_cannot_overwrite_the_corrupted_file(open_page, tmp_path):
 
     page.click("#btn-apply")
     page.wait_for_function(
-        "getComputedStyle(document.getElementById('error-toast')).opacity === '1'"
+        "getComputedStyle(document.getElementById('global-error-banner')).display !== 'none'"
     )
 
     assert (tmp_path / "settings.json").read_text(encoding="utf-8") == BROKEN_RAW, \
@@ -169,20 +169,20 @@ def test_a_real_validation_failure_still_says_validation(open_page):
 def error_toast(page):
     return page.evaluate(
         """() => {
-            const t = document.getElementById('error-toast');
-            return { visible: !!t && t.style.opacity === '1',
+            const t = document.getElementById('global-error-banner');
+            return { visible: !!t && getComputedStyle(t).display !== 'none',
                      text: t ? t.textContent.trim() : '' };
         }"""
     )
 
 
-def test_refused_save_toast_names_the_unreadable_file(open_page):
+def test_refused_save_notice_names_the_unreadable_file(open_page):
     page = open_page({}, raw_settings=BROKEN_RAW)
     page.wait_for_timeout(400)
 
     apply_an_edit(page, "55")
     page.wait_for_function(
-        "() => document.getElementById('error-toast').style.opacity === '1'",
+        "() => getComputedStyle(document.getElementById('global-error-banner')).display !== 'none'",
         timeout=5000,
     )
 
@@ -192,18 +192,18 @@ def test_refused_save_toast_names_the_unreadable_file(open_page):
         "a refusal must not be toasted as a validation failure"
 
 
-def test_a_real_validation_failure_keeps_the_validation_toast(open_page):
+def test_a_real_validation_failure_keeps_the_field_error_summary(open_page):
     page = open_page({})
     page.wait_for_timeout(400)
 
     apply_an_edit(page, "500")
     page.wait_for_function(
-        "() => document.getElementById('error-toast').style.opacity === '1'",
+        "() => getComputedStyle(document.getElementById('global-error-banner')).display !== 'none'",
         timeout=5000,
     )
 
     toast = error_toast(page)
-    assert "validation errors" in toast["text"], toast
+    assert "Not saved. Errors" in toast["text"], toast
     assert "cannot be read" not in toast["text"], \
         "a validation failure must not be toasted as a refusal"
 
@@ -277,3 +277,153 @@ def test_an_ordinary_dialog_shows_no_path_block(open_page):
     assert not state["path_visible"]
     assert not state["copy_visible"]
     assert not state["widened"]
+
+
+
+@pytest.mark.parametrize('operation,endpoint', [
+    ('openSettingsFile("active")', '**/api/settings/open_file'),
+    ('resetSettings()', '**/api/settings/reset'),
+    ('commitGlobalDraft()', '**/api/settings/commit'),
+    ('openLogsFolder()', '**/api/export/open_logs_folder'),
+    ('exportLogs()', '**/api/export/logs'),
+    ('openExternalLink("github")', '**/api/about/open_link'),
+])
+@pytest.mark.parametrize('failure', ['disconnect', 'invalid_json'])
+def test_operation_transport_failures_leave_a_persistent_notice(open_page, tmp_path, operation, endpoint, failure):
+    page = open_page({})
+    before = (tmp_path / 'settings.json').read_bytes()
+    if failure == 'disconnect':
+        page.route(endpoint, lambda route: route.abort('failed'))
+    else:
+        page.route(endpoint, lambda route: route.fulfill(status=502, content_type='text/html', body='gateway failed'))
+    with page.expect_request(endpoint):
+        page.evaluate('() => { window.' + operation + '; }')
+    page.wait_for_timeout(400)
+    if page.locator('#modal-overlay').is_visible():
+        page.click('#modal-ok')
+    page.evaluate('renderErrors()')
+    notices = page.locator('#persistent-notices [data-notice-id]')
+    assert notices.count() == 1, f'{operation} lost its failure after the dialog was dismissed'
+    assert notices.first.is_visible()
+    page.evaluate("changeLanguage('ru')")
+    assert notices.count() == 1
+    assert (tmp_path / 'settings.json').read_bytes() == before
+
+
+
+@pytest.mark.parametrize('backup_exists', [False, True])
+def test_backup_notice_only_offers_an_actionable_file(open_page, tmp_path, monkeypatch, backup_exists):
+    import routes.settings_api as settings_api
+
+    backup = tmp_path / 'settings_corrupted_backup_20260923_120000.json'
+    if backup_exists:
+        backup.write_text('{broken', encoding='utf-8')
+    def refuse_editor(*args, **kwargs):
+        raise OSError('Editor unavailable')
+    monkeypatch.setattr(settings_api.subprocess, 'Popen', refuse_editor)
+    page = open_page({})
+    disk = (tmp_path / 'settings.json').read_bytes()
+    for locale in sorted((REPO_ROOT / 'src/locales').glob('*.json')):
+        page.evaluate('changeLanguage', locale.stem)
+        with page.expect_response('**/api/settings/open_file') as response:
+            page.evaluate("openSettingsFile('backup')")
+        page.wait_for_selector('#modal-overlay', state='visible')
+        assert response.value.json()['path'] == (str(backup) if backup_exists else '')
+        assert page.locator('#modal-path-copy').is_visible() == backup_exists
+        assert page.locator('#modal-path').inner_text() == (str(backup) if backup_exists else '')
+        assert '{path}' not in page.locator('#modal-message').inner_text()
+        page.click('#modal-ok')
+    assert (tmp_path / 'settings.json').read_bytes() == disk
+
+
+@pytest.mark.parametrize('token_state', ['absent', 'saved', 'wiped'])
+def test_token_instructions_are_truthful_before_save_and_after_wipe(open_page, tmp_path, token_state):
+    import config_loader
+
+    tokens = None if token_state == 'absent' else {'openai': 'sk-fake0123456789abcdef0123456789abcdef'}
+    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'openai'}, tokens=tokens)
+    if token_state == 'wiped':
+        page.evaluate("() => { wipeToken('openai'); }")
+        with page.expect_response('**/api/settings/wipe_token'):
+            page.click('#modal-ok')
+        page.wait_for_function('!rawOriginalState.ENV_TOKENS.openai')
+    assert bool(config_loader._manager.token_manager.get_tokens().get('OPENAI_TOKEN')) == (token_state == 'saved')
+    if token_state == 'absent':
+        assert not (tmp_path / '.env').exists()
+    for locale in sorted((REPO_ROOT / 'src/locales').glob('*.json')):
+        page.evaluate('changeLanguage', locale.stem)
+        hints = page.locator('[data-i18n="hint_prov_token"]').all_text_contents()
+        assert hints
+        for hint in hints:
+            assert str(tmp_path) not in hint and '.env' not in hint
+            assert 'securely' not in hint and 'безопасно' not in hint
+            instruction = {'en': 'save', 'ru': 'сохран'}.get(locale.stem)
+            if instruction:
+                assert instruction in hint.lower()
+        assert page.locator('#prov_token_openai').get_attribute('placeholder') == (
+            '********' if token_state == 'saved' else page.evaluate("getT('placeholder_token')"))
+
+
+def test_lost_reset_reply_reports_uncertainty_after_real_reset(open_page, tmp_path):
+    page = open_page({'MAX_DIMENSION': 789})
+    before = (tmp_path / 'settings.json').read_bytes()
+    def lose_reply(route):
+        response = route.fetch()
+        assert response.ok
+        route.abort('failed')
+    page.route('**/api/settings/reset', lose_reply)
+    page.evaluate('resetSettings()')
+    page.wait_for_selector('#modal-overlay', state='visible')
+    assert (tmp_path / 'settings.json').read_bytes() != before
+    assert page.locator('#modal-message').inner_text() == page.evaluate("getT('err_settings_reset_unconfirmed')")
+    page.click('#modal-ok')
+    assert page.locator('[data-notice-id="reset"]').is_visible()
+    page.evaluate("notice({id:'unrelated', key:'notice_action_failed'})")
+    page.unroute('**/api/settings/reset')
+    page.evaluate('resetSettings()')
+    page.wait_for_function("!window.notices.has('reset')")
+    assert page.locator('[data-notice-id="unrelated"]').is_visible()
+
+
+@pytest.mark.parametrize('operation,endpoint,confirmation', [
+    ('startProcessing()', '**/api/process/start', False),
+    ('stopProcessing()', '**/api/process/stop', False),
+    ('wipeToken("openai")', '**/api/settings/wipe_token', True),
+    ('clearLogs()', '**/api/export/clear_logs', True),
+])
+@pytest.mark.parametrize('failure', ['disconnect', 'invalid_json'])
+def test_run_and_confirmation_transport_notices(
+        open_page, tmp_path, monkeypatch, operation, endpoint, confirmation, failure):
+    import threading
+    from routes import execution_api
+    release = threading.Event()
+    if operation == 'stopProcessing()':
+        class HeldCore:
+            def run(self):
+                release.wait(15)
+        monkeypatch.setattr(execution_api, 'ProcessorCore', lambda *args, **kwargs: HeldCore())
+    page = open_page({})
+    before = (tmp_path / 'settings.json').read_bytes()
+    try:
+        if operation == 'stopProcessing()':
+            page.click('#btn-start')
+            page.wait_for_function("window.runState.phase === 'running'")
+        if failure == 'disconnect':
+            page.route(endpoint, lambda route: route.abort('failed'))
+        else:
+            page.route(endpoint, lambda route: route.fulfill(status=502, content_type='text/html', body='unreadable'))
+        page.evaluate('() => { ' + operation + '; }')
+        if confirmation:
+            page.locator('#modal-ok').click()
+        page.wait_for_selector('[data-notice-id]')
+        if page.locator('#modal-overlay').is_visible():
+            page.locator('#modal-ok').click()
+        page.evaluate('renderErrors()')
+        assert page.locator('[data-notice-id]').count() == 1
+        assert (tmp_path / 'settings.json').read_bytes() == before
+    finally:
+        release.set()
+        worker = execution_api.run_controller.thread
+        if worker is not None:
+            worker.join(5)
+            assert not worker.is_alive()

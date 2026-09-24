@@ -3,6 +3,7 @@
 
 
 from pathlib import Path
+import hashlib
 import math
 import os
 import re
@@ -17,6 +18,30 @@ def get_safe_path(path_obj: Path) -> str:
             return "\\\\?\\UNC\\" + safe_path[2:]
         return "\\\\?\\" + safe_path
     return safe_path
+
+
+SOURCE_HASH_CHUNK_BYTES = 1 << 20
+
+
+def source_state(path: Path) -> tuple[int, int] | None:
+    try:
+        info = Path(get_safe_path(path)).stat()
+    except OSError:
+        return None
+    return info.st_size, info.st_mtime_ns
+
+
+def source_sha256(path: Path, stop=None) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        with open(get_safe_path(path), "rb") as source:
+            while chunk := source.read(SOURCE_HASH_CHUNK_BYTES):
+                if stop is not None and stop.is_set():
+                    return None
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
 
 
 _LONG_PATH_PREFIX = "\\\\?\\"
@@ -89,6 +114,16 @@ def sanitize_filename_prefix(stem: str, max_length: int) -> str:
     )
     collapsed = " ".join(replaced.split())
     return collapsed[:max_length].rstrip(". ")
+
+
+def replace_lone_surrogates(text: str) -> str:
+    try:
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        return "".join(
+            "�" if 0xD800 <= ord(ch) <= 0xDFFF else ch for ch in text
+        )
 
 
 _TEXT_FORBIDDEN = ({chr(c) for c in range(0x20)} - {"\t", "\n", "\r"}) | {"\x7f"}

@@ -52,8 +52,8 @@ def api(tmp_path, monkeypatch):
     (tmp_path / "input").mkdir()
     monkeypatch.setattr(config_loader, "_manager", mgr)
 
-    monkeypatch.setattr(exec_api, "processing_thread", None)
-    exec_api.abort_flag.clear()
+    monkeypatch.setattr(exec_api, "run_controller", exec_api.RunController())
+    exec_api.run_controller.abort.clear()
 
     def build(**overrides):
         payload = {
@@ -66,7 +66,7 @@ def api(tmp_path, monkeypatch):
 
     setattr(build, "mgr", mgr)  # noqa: B010  (for tests that seed the sandbox .env / paths)
     yield build
-    exec_api.abort_flag.clear()
+    exec_api.run_controller.abort.clear()
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def fake_core(monkeypatch):
     monkeypatch.setattr(exec_api, "ProcessorCore", FakeCore)
     yield FakeCore
     FakeCore.release.set()
-    thread = exec_api.processing_thread
+    thread = exec_api.run_controller.thread
     if thread is not None:
         thread.join(timeout=5)
         assert not thread.is_alive(), "fake run failed to shut down"
@@ -120,12 +120,19 @@ def test_api_with_header_token_is_allowed(api):
     assert response.status_code == 200
 
 
-def test_api_with_query_token_is_allowed(api):
+def test_the_query_token_opens_the_event_stream_only(api):
     client = api().test_client()
-    response = client.get(
+    stream = client.get("/api/process/stream", query_string={"token": SESSION_TOKEN})
+    assert stream.status_code == 200
+    stream.close()
+    assert client.get(
         "/api/process/status", query_string={"token": SESSION_TOKEN}
-    )
-    assert response.status_code == 200
+    ).status_code == 403
+    assert client.get("/api/process/stream").status_code == 403
+    assert client.get(
+        "/api/process/stream", query_string={"token": "wrong-guess"}
+    ).status_code == 403
+    assert client.get("/api/process/status", headers=AUTH).status_code == 200
 
 
 def test_page_route_needs_no_token_on_loopback_hosts(api):
@@ -243,38 +250,40 @@ def test_start_with_invalid_settings_returns_error_details(api, fake_core):
     assert "JPEG_QUALITY" in body["errors"]
 
     assert fake_core.instances == []
-    assert client.get("/api/process/status", headers=AUTH).get_json() == {
-        "is_running": False,
-        "is_stopping": False,
-    }
+    snapshot = client.get("/api/process/status", headers=AUTH).get_json()
+    assert not snapshot["is_running"] and not snapshot["is_stopping"]
+    assert snapshot["phase"] == "idle" and snapshot["run_id"] == ""
 
 
 
 def test_stop_without_active_run_is_rejected(api):
     client = api().test_client()
     response = client.post("/api/process/stop", headers=AUTH)
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 def test_status_and_stop_track_the_run_lifecycle(api, fake_core):
     client = api().test_client()
 
     def status():
-        return client.get("/api/process/status", headers=AUTH).get_json()
+        snapshot = client.get("/api/process/status", headers=AUTH).get_json()
+        return {key: snapshot[key] for key in ("is_running", "is_stopping")}
 
     assert status() == {"is_running": False, "is_stopping": False}
 
     start_run(client)
     assert status() == {"is_running": True, "is_stopping": False}
 
-    response = client.post("/api/process/stop", headers=AUTH)
+    response = client.post("/api/process/stop", headers={**AUTH, "X-Run-Id": exec_api.run_controller.run_id})
     assert response.status_code == 200
-    assert exec_api.abort_flag.is_set()
-    assert exec_api.processing_thread.is_alive()
+    assert exec_api.run_controller.abort.is_set()
+    assert exec_api.run_controller.thread is not None
+    assert exec_api.run_controller.thread.is_alive()
     assert status() == {"is_running": True, "is_stopping": True}
 
     fake_core.release.set()
-    exec_api.processing_thread.join(timeout=5)
+    assert exec_api.run_controller.thread is not None
+    exec_api.run_controller.thread.join(timeout=5)
     assert status() == {"is_running": False, "is_stopping": False}
 
 
@@ -292,7 +301,9 @@ def test_export_with_no_output_configured_is_400(api):
     client = api(OUTPUT_FOLDER_PATH="").test_client()
     response = client.post("/api/export/database", headers=AUTH)
     assert response.status_code == 400
-    assert response.get_json()["message_key"] == "err_export_no_results"
+    assert response.get_json()["message_key"] == "err_export_no_folder"
+    assert response.get_json()["export_state"] == "refused"
+    assert response.get_json()["refs"] == {"output": "OUTPUT_FOLDER_PATH"}
 
 
 def test_export_without_a_database_is_404(api):
@@ -313,8 +324,10 @@ def test_export_success_writes_files_and_releases_the_db(api, tmp_path):
         1, PageResult(1, "0001_p001.jpg", Status.OK.value, "")
     )
     controller.handle_file_completed(
-        1, FileSummary(1, "1", "ok", Status.OK.value, "done")
+        1, FileSummary(1, "1", "ok", "done")
     )
+    controller.finalize_file(1)
+    controller.record_run_configuration(False, "", ())
     controller.close()
 
     client = api().test_client()
@@ -332,12 +345,12 @@ def test_export_success_writes_files_and_releases_the_db(api, tmp_path):
 
     with open(registry_csv, newline="", encoding="utf-8") as f:
         registry_rows = list(csv.DictReader(f))
-    assert [r["relative_file_path"] for r in registry_rows] == ["docs/report.pdf"]
-    assert registry_rows[0]["final_aggregate_status"] == Status.OK.value
+    assert [r["file_path"] for r in registry_rows] == ["docs/report.pdf"]
+    assert registry_rows[0]["overall_result"] == "ok"
 
     with open(page_log_csv, newline="", encoding="utf-8") as f:
         page_rows = list(csv.DictReader(f))
-    assert [r["saved_filename"] for r in page_rows] == ["0001_p001.jpg"]
+    assert [r["output_file"] for r in page_rows] == ["0001_p001.jpg"]
 
     moved = db_path.with_name("renamed_ok.db")
     os.rename(db_path, moved)
@@ -357,7 +370,9 @@ def explorer_spy(monkeypatch):
 def test_db_export_reveals_the_xlsx_in_explorer(api, tmp_path, explorer_spy):
     db_path = tech_folder_path(tmp_path / "output") / "application_state.db"
     db_path.parent.mkdir(parents=True)
-    SQLiteDatabaseController(db_path).close()
+    controller = SQLiteDatabaseController(db_path)
+    controller.record_run_configuration(False, "", ())
+    controller.close()
 
     client = api().test_client()
     response = client.post("/api/export/database", headers=AUTH)
@@ -634,8 +649,7 @@ def test_a_missing_notepad_is_reported_with_the_path_to_open(api, tmp_path, monk
     assert locales
     for locale in locales:
         strings = json.loads(locale.read_text(encoding="utf-8"))
-        for key in ("err_editor_launch_failed", "err_no_settings_backup",
-                    "err_settings_file_missing"):
+        for key in ("err_editor_launch_failed", "err_settings_file_missing"):
             assert key in strings, f"{key} missing from {locale.name}"
             assert strings[key].rstrip().endswith("{path}"), (
                 f"{key} in {locale.name} must end with the {{path}} placeholder"
@@ -702,8 +716,8 @@ def test_preview_refuses_non_txt_before_touching_disk(api, tmp_path):
     responses = [_preview(client, str(path)) for path in (exists, missing)]
     for response in responses:
         assert response.status_code == 400
-        assert response.get_json() == {"preview_type": "error",
-                                       "content": "preview_not_txt"}
+        assert response.get_json()["preview_type"] == "error"
+        assert response.get_json()["message_key"] == "preview_not_txt"
     assert "SECRET" not in responses[0].get_data(as_text=True)
 
 
@@ -714,8 +728,8 @@ def test_preview_missing_and_directory_paths_answer_the_locale_key(api, tmp_path
     for path in ("", str(tmp_path / "missing.txt"), str(folder)):
         response = _preview(client, path)
         assert response.status_code == 400
-        assert response.get_json() == {"preview_type": "error",
-                                       "content": "preview_no_file"}
+        assert response.get_json()["preview_type"] == "error"
+        assert response.get_json()["message_key"] == "preview_no_file"
 
 
 def test_preview_read_failure_is_a_key_never_an_exception(api, tmp_path):
@@ -725,8 +739,8 @@ def test_preview_read_failure_is_a_key_never_an_exception(api, tmp_path):
 
     response = _preview(client, str(utf16))
     assert response.status_code == 500
-    assert response.get_json() == {"preview_type": "error",
-                                   "content": "preview_read_failed"}
+    assert response.get_json()["preview_type"] == "error"
+    assert response.get_json()["message_key"] == "preview_read_failed"
     assert "codec" not in response.get_data(as_text=True)
 
 
@@ -737,8 +751,8 @@ def test_preview_refuses_bytes_that_decode_but_are_not_text(api, tmp_path):
 
     response = _preview(client, str(bomless))
     assert response.status_code == 500
-    assert response.get_json() == {"preview_type": "error",
-                                   "content": "preview_read_failed"}
+    assert response.get_json()["preview_type"] == "error"
+    assert response.get_json()["message_key"] == "preview_read_failed"
     assert "secret" not in response.get_data(as_text=True)
 
 
@@ -939,3 +953,242 @@ def test_about_open_link_failure_answers_with_a_translated_key(api, monkeypatch)
     body = r.get_json()
     assert body["message_key"] == "err_open_link_failed"
     assert body["url"] == APP_LINKS["github"]
+
+
+def seed_export_run(tmp_path):
+    database = tech_folder_path(tmp_path / "output") / "application_state.db"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    controller = SQLiteDatabaseController(database)
+    controller.record_run_configuration(False, "", ())
+    controller.handle_file_started(1, "original.png", ".png", "Test")
+    controller.handle_frame_saved(1, PageResult(1, "one.jpg", "ok", ""))
+    controller.handle_file_completed(1, FileSummary(1, "1", "ok", "done"))
+    controller.close()
+    return database
+
+
+def test_export_failure_returns_saved_inventory_and_original_source_retry(api, tmp_path, monkeypatch):
+    import data_exporter
+    seed_export_run(tmp_path)
+    app = api()
+    client = app.test_client()
+    original = data_exporter.SQLiteDataExporter._workbook
+    def fail(*args, **kwargs):
+        raise RuntimeError("workbook failure")
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "_workbook", fail)
+    response = client.post("/api/export/database", headers=AUTH)
+    assert response.status_code == 207
+    data = response.get_json()
+    assert len(data["saved"]) == 3 and data["failed"][0]["report"] == "Workbook"
+    assert data["recovery_id"] and all(Path(r["path"]).is_file() for r in data["saved"])
+    assert "database" not in data
+    config_loader._manager.settings_path.write_text(json.dumps({
+        "INPUT_FOLDER_PATH": str(tmp_path / "input"), "OUTPUT_FOLDER_PATH": str(tmp_path / "different")
+    }), encoding="utf-8")
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "_workbook", original)
+    destination = tmp_path / "recovered"
+    recovered = client.post("/api/export/database", headers=AUTH, json={
+        "recovery_id": data["recovery_id"], "destination": str(destination)})
+    assert recovered.status_code == 200, recovered.get_json()
+    final = recovered.get_json()
+    assert len(final["saved"]) == 4 and final["failed"] == []
+    assert all(Path(r["path"]).parent == destination for r in final["saved"])
+    with next(destination.glob("results_*.csv")).open(encoding="utf-8", newline="") as handle:
+        assert next(iter(csv.DictReader(handle)))["file_path"] == "original.png"
+    assert not (tmp_path / "different").exists()
+
+
+def test_recovery_rejects_replaced_source_and_forged_ids(api, tmp_path):
+    database = seed_export_run(tmp_path)
+    client = api().test_client()
+    data = client.post("/api/export/database", headers=AUTH).get_json()
+    archived = database.with_suffix(".archived")
+    database.rename(archived)
+    replacement = SQLiteDatabaseController(database)
+    replacement.record_run_configuration(False, "", ())
+    replacement.close()
+    for token in (data["recovery_id"], "invented-token"):
+        response = client.post("/api/export/database", headers=AUTH, json={"recovery_id": token})
+        assert response.status_code == 409
+        assert response.get_json()["message_key"] == "err_export_source_changed"
+
+
+def test_recovery_also_refuses_during_processing(api, fake_core, tmp_path):
+    seed_export_run(tmp_path)
+    client = api().test_client()
+    data = client.post("/api/export/database", headers=AUTH).get_json()
+    start_run(client)
+    response = client.post("/api/export/database", headers=AUTH, json={"recovery_id": data["recovery_id"]})
+    assert response.status_code == 409 and response.get_json()["message_key"] == "err_export_run_active"
+
+
+def test_export_start_lock_refuses_overlap_without_waiting(api):
+    client = api().test_client()
+    with exec_api.run_controller.lock:
+        response = client.post("/api/export/database", headers=AUTH)
+    assert response.status_code == 409
+
+
+
+def test_message_envelope_preserves_domain_payload_and_literal_detail():
+    from schemas import message_envelope
+    reports = [{"format": "csv", "path": "C:/reports/Results.csv"}]
+    data = message_envelope({"status": "error", "message": "i18n:err_settings_invalid|literal | detail",
+                             "field": "DOCUMENT_RANGE", "saved": reports, "recovery_id": "reference"})
+    assert data['message_key'] == 'err_settings_invalid'
+    assert data['detail'] == 'literal | detail'
+    assert data['message'] == '' and data['field'] == 'DOCUMENT_RANGE'
+    assert data['saved'] == reports and data['recovery_id'] == 'reference'
+    assert data['path'] == '' and data['args'] == {} and data['refs'] == {}
+
+
+def test_ui_message_routes_share_the_envelope(api):
+    client = api().test_client()
+    replies = [client.post('/api/preview/file', json={'filepath': ''}, headers=AUTH),
+               client.post('/api/export/logs', headers=AUTH),
+               client.post('/api/settings/open_file', json={'target': 'backup'}, headers=AUTH)]
+    for reply in replies:
+        data = reply.get_json()
+        assert {'status', 'message_key', 'detail', 'field', 'path', 'args', 'refs'} <= data.keys()
+        assert data['message_key']
+        assert not data['message'].startswith('i18n:')
+
+
+
+def test_unconfirmed_export_response_keeps_source_without_empty_inventory(api, tmp_path, monkeypatch):
+    import data_exporter
+
+    seed_export_run(tmp_path)
+    client = api().test_client()
+    original = data_exporter.SQLiteDataExporter.export_all_formats
+
+    def lose_result(self, destination):
+        original(self, destination)
+        raise RuntimeError("Lost completed export result")
+
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "export_all_formats", lose_result)
+    response = client.post("/api/export/database", headers=AUTH)
+    result = response.get_json()
+    assert response.status_code == 500
+    assert result["export_state"] == "unknown"
+    assert result["detail"] == "Lost completed export result"
+    assert "saved" not in result and "failed" not in result
+    assert result["recovery_id"]
+    assert list((tmp_path / "output/exports").glob("*.xlsx"))
+
+
+
+def test_exception_envelope_preserves_localizable_reason_and_literal_fallback():
+    from schemas import ConfigurationError, exception_message, message_envelope
+    error = ConfigurationError("i18n:err_resume_ai_work_changed|literal | fallback",
+                               setting_field="START_OVER", detail_key="err_resume_ai_context_changed_detail")
+    envelope = exception_message(error)
+    assert envelope["message_key"] == "err_resume_ai_work_changed"
+    assert envelope["detail"] == "literal | fallback"
+    assert envelope["detail_key"] == "err_resume_ai_context_changed_detail"
+    assert envelope["field"] == "START_OVER" and envelope["path"] == ""
+    assert message_envelope(envelope) == envelope
+    old = exception_message(ValueError("literal provider diagnostic"))
+    assert old["message"] == "literal provider diagnostic"
+    assert "detail_key" not in old
+
+
+@pytest.mark.parametrize("stale", ["old-run", ""])
+def test_stop_requires_current_run_identity_and_cannot_stop_a_new_worker(api, fake_core, stale):
+    client = api().test_client()
+    first = start_run(client).get_json()["run_state"]
+    first_abort = exec_api.run_controller.abort
+    assert client.post("/api/process/stop", headers={**AUTH, "X-Run-Id": first["run_id"]}).status_code == 200
+    fake_core.release.set()
+    assert exec_api.run_controller.thread is not None
+    exec_api.run_controller.thread.join(5)
+    fake_core.release = threading.Event()
+    second = start_run(client).get_json()["run_state"]
+    assert second["run_id"] != first["run_id"]
+    assert first_abort.is_set() and first_abort is not exec_api.run_controller.abort
+    identity = first["run_id"] if stale else ""
+    response = client.post("/api/process/stop", headers={**AUTH, "X-Run-Id": identity})
+    assert response.status_code == 409
+    assert not exec_api.run_controller.abort.is_set()
+    assert response.get_json()["run_state"]["run_id"] == second["run_id"]
+    response = client.post("/api/process/stop", headers={**AUTH, "X-Run-Id": second["run_id"]})
+    assert response.status_code == 200 and exec_api.run_controller.abort.is_set()
+
+
+@pytest.mark.parametrize("outcome", ["done", "aborted", "failed"])
+def test_status_retains_terminal_outcome_after_worker_exit_and_rejects_old_events(api, monkeypatch, outcome):
+    class Core:
+        def __init__(self, settings, abort, on_progress):
+            self.emit = on_progress
+
+        def run(self):
+            self.emit({"type": "progress", "value": 37})
+            self.emit({"type": outcome, "detail": "retained diagnostic"})
+    monkeypatch.setattr(exec_api, "ProcessorCore", Core)
+    client = api().test_client()
+    start_run(client)
+    assert exec_api.run_controller.thread is not None
+    exec_api.run_controller.thread.join(5)
+    state = client.get("/api/process/status", headers=AUTH).get_json()
+    assert state["phase"] == outcome and state["progress"] == 37
+    assert not state["is_running"] and not state["is_stopping"]
+    assert state["terminal"] == {"type": outcome, "detail": "retained diagnostic"}
+    exec_api.run_controller.emit(state["run_id"], {"type": "progress", "value": 99})
+    exec_api.run_controller.emit("older-run", {"type": "failed"})
+    assert client.get("/api/process/status", headers=AUTH).get_json() == state
+
+
+def test_stop_and_start_ownership_use_the_same_lock(api, fake_core):
+    client = api().test_client()
+    current = start_run(client).get_json()["run_state"]["run_id"]
+    entered = threading.Event()
+    responses = []
+
+    def stop():
+        entered.set()
+        responses.append(client.post("/api/process/stop", headers={**AUTH, "X-Run-Id": current}).status_code)
+    with exec_api.run_controller.lock:
+        thread = threading.Thread(target=stop)
+        thread.start()
+        assert entered.wait(2)
+        assert not exec_api.run_controller.abort.is_set()
+        exec_api.run_controller.run_id = "new-owner"
+    thread.join(5)
+    assert not thread.is_alive() and responses == [409]
+    assert not exec_api.run_controller.abort.is_set()
+
+
+@pytest.mark.parametrize("outcome", ["done", "aborted", "failed"])
+def test_start_is_admitted_as_soon_as_the_terminal_outcome_is_published(api, monkeypatch, outcome):
+    import queue
+    import time
+    lifecycle: list[str] = []
+
+    class Core:
+        def __init__(self, settings, abort, on_progress):
+            self.emit = on_progress
+
+        def run(self):
+            self.emit({"type": "progress", "value": 50})
+            self.emit({"type": outcome})
+            time.sleep(0.3)
+            lifecycle.append("core shut down")
+    monkeypatch.setattr(exec_api, "ProcessorCore", Core)
+    client = api().test_client()
+    listener: queue.Queue = queue.Queue()
+    exec_api.global_broadcaster.add_listener(listener)
+    try:
+        first = start_run(client).get_json()["run_state"]["run_id"]
+        while True:
+            event = listener.get(timeout=5)
+            if event.get("type") == outcome:
+                break
+        assert lifecycle == ["core shut down"]
+        assert event["run_state"]["run_id"] == first and not event["run_state"]["is_running"]
+        second = start_run(client).get_json()["run_state"]
+        assert second["run_id"] != first and second["is_running"]
+    finally:
+        exec_api.global_broadcaster.remove_listener(listener)
+        thread = exec_api.run_controller.thread
+        if thread is not None:
+            thread.join(5)

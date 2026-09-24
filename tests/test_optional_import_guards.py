@@ -22,7 +22,6 @@ PINNED_GUARDED_LIBRARIES = {
     "pillow_heif",
     "pillow_avif",
     "PIL",
-    "openpyxl",
     "webview",
     "werkzeug",
 }

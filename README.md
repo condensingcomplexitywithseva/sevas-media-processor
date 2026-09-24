@@ -25,6 +25,8 @@ the installer does, are in SECURITY.md.)
 
 ## Work in progress
 
+Current version: v0.2.0
+
 This is a 0.x application under active development. Interfaces, settings,
 and outputs may change between versions. Feedback is welcome; no support
 and no publishing schedule are promised.
@@ -106,11 +108,19 @@ $RequiredMajor = 3
 $RequiredMinor = 14
 $UseStrictRequirements = $true
 
+function Stop-OnFailure {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: $Step (exit code $LASTEXITCODE). The steps after this one were not run." -ForegroundColor Red
+        Read-Host "Press Enter to close this window"
+        exit 1
+    }
+}
+
 Write-Host "1/5 Verifying Global Python Installation..."
 try {
     $pythonPath = (Get-Command python.exe -ErrorAction Stop).Source
     $versionString = & $pythonPath --version 2>&1
-    # Extracts the version numbers (e.g., "Python 3.14.3" -> 3, 14, 3)
     $versionParts = ($versionString -replace '[^\d.]', '').Split('.')
     $major = [int]$versionParts[0]
     $minor = [int]$versionParts[1]
@@ -131,7 +141,7 @@ try {
                 $UseStrictRequirements = $false
             } else {
                 Write-Host "Setup cancelled. Cannot proceed without a compatible Python version." -ForegroundColor Red
-                exit
+                exit 1
             }
         }
     } elseif ($major -gt $RequiredMajor -or $minor -gt $RequiredMinor) {
@@ -144,7 +154,7 @@ try {
             $UseStrictRequirements = $false
         } else {
             Write-Host "Setup cancelled. This version of the application is tested with Python $RequiredMajor.$RequiredMinor." -ForegroundColor Red
-            exit
+            exit 1
         }
     } else {
         Write-Host "Found Python $versionString. (Requirements met)." -ForegroundColor Green
@@ -155,7 +165,13 @@ try {
     } else {
         Write-Host "Python not found. Attempting to install via winget..." -ForegroundColor Yellow
     }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "winget is not available on this computer. Install Python 3.14 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' during the installation), then run this script again." -ForegroundColor Red
+        Read-Host "Press Enter to close this window"
+        exit 1
+    }
     winget install --id Python.Python.3.14 --silent --accept-source-agreements --accept-package-agreements
+    Stop-OnFailure "installing Python with winget"
 
     Write-Host "Please restart this terminal window to complete the Python path registration." -ForegroundColor Cyan
     Read-Host "Press Enter to exit and then re-open this folder..."
@@ -163,8 +179,9 @@ try {
 }
 
 Write-Host "2/5 Creating/Verifying isolated Virtual Environment..."
-if (!(Test-Path "$InstallDir\venv")) {
+if (!(Test-Path -LiteralPath "$InstallDir\venv")) {
     & $pythonPath -m venv "$InstallDir\venv"
+    Stop-OnFailure "creating the virtual environment"
     Write-Host "Virtual environment created." -ForegroundColor Green
 } else {
     Write-Host "Virtual environment already exists. Skipping creation." -ForegroundColor Cyan
@@ -175,30 +192,32 @@ $venvPythonw = "$InstallDir\venv\Scripts\pythonw.exe"
 
 Write-Host "3/5 Installing media libraries into the virtual environment (This takes a moment)..."
 & $venvPython -m pip install --upgrade pip | Out-Null
+Stop-OnFailure "upgrading pip"
 
 if ($UseStrictRequirements) {
-    # Every package pinned, so this install matches the tested one exactly
     & $venvPython -m pip install -r "$InstallDir\requirements.lock"
+    Stop-OnFailure "installing the libraries"
 } else {
-    # Unpinned, and direct dependencies only, for older or newer Python versions
     & $venvPython -m pip install -r "$InstallDir\requirements_no_version.txt"
+    Stop-OnFailure "installing the libraries"
 }
 
 Write-Host "4/5 Preparing first-run files..."
 foreach ($dir in @("input", "output")) {
-    if (!(Test-Path "$InstallDir\$dir")) {
-        New-Item -ItemType Directory -Path "$InstallDir\$dir" | Out-Null
+    if (!(Test-Path -LiteralPath "$InstallDir\$dir")) {
+        [System.IO.Directory]::CreateDirectory("$InstallDir\$dir") | Out-Null
         Write-Host "Created empty '$dir' folder." -ForegroundColor Green
     }
 }
-if (!(Test-Path "$InstallDir\settings.json")) {
-    Copy-Item "$InstallDir\settings.example.json" "$InstallDir\settings.json"
+if (!(Test-Path -LiteralPath "$InstallDir\settings.json")) {
+    [System.IO.File]::Copy("$InstallDir\settings.example.json", "$InstallDir\settings.json")
     Write-Host "Created settings.json from the settings.example.json template." -ForegroundColor Green
 }
 
 Write-Host "5/5 Creating your Desktop Shortcut..."
+$DesktopDir = [Environment]::GetFolderPath('Desktop')
 $WshShell = New-Object -comObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$Home\Desktop\Seva's Media Processor.lnk")
+$Shortcut = $WshShell.CreateShortcut("$DesktopDir\Seva's Media Processor.lnk")
 $Shortcut.TargetPath = $venvPythonw
 $Shortcut.Arguments = ".\src\main.py"
 $Shortcut.WorkingDirectory = $InstallDir
@@ -215,16 +234,15 @@ Read-Host "Press Enter to close this window"
 ### Option 3: Manual Setup
 
 1. Download and install Python 3.14 from: https://www.python.org/downloads/
-   If you already have Python 3.14, you can skip this step. (Newer versions
-   are untested: the exact tested library versions may not exist for them
-   yet - see the note under step 6.)
+   If you already have Python 3.14, you can skip this step. Newer versions are untested.
    CRITICAL: During installation, you MUST check the box at the bottom that says "Add python.exe to PATH".
 2. Open the application folder.
 3. Hold down Shift on your keyboard and Right-Click any empty space inside the folder.
 4. Click "Open PowerShell window here" or "Open in Terminal".
 5. Type this and press Enter to create a virtual environment: `python -m venv venv`
-6. Type this and press Enter to install the dependencies: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
-   Note: If you are proceeding with an older or newer Python version at your own risk, then run this instead: `.\venv\Scripts\python.exe -m pip install -r requirements_no_version.txt`
+6. Type one of these two lines and press Enter to install the dependencies.
+   With Python 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
+   With any other Python version: `.\venv\Scripts\python.exe -m pip install -r requirements_no_version.txt`
 7. Create two folders named `input` and `output` inside the application folder
    (Right-click > New > Folder). Files you put in `input` are what the application processes;
    the results land in `output`.
@@ -263,6 +281,67 @@ requirements.lock lists every single package the install puts on your machine,
 with the exact version of each - on the tested Python (3.14). If you chose to
 proceed on an older or newer Python instead, the installer says so and
 installs unpinned versions, which the lock file does not describe.
+
+## Updating to a new version
+
+The application never checks for updates itself. Compare the version
+shown at the bottom of the application's sidebar with the
+"Current version" line near the top of this page. If they differ, a
+newer version exists.
+
+Two lists follow. Use the first one if you installed by running the
+install script or by pasting it into a terminal. Use the second one if
+you installed by typing the commands yourself.
+
+### Update with the install script
+
+1. Rename your current application folder by adding `-old` to the end
+   of its name.
+2. On this project's GitHub page, click the green "Code" button above
+   the file list, then click "Download ZIP" in the menu that opens.
+3. Open your Downloads folder. Right-click the downloaded ZIP file and
+   choose "Extract All...", then click "Extract".
+4. Move the extracted `sevas-media-processor-main` folder to where the
+   old folder is.
+5. Rename the new folder to the old folder's name without the `-old`.
+   For example, if the old folder is now `sevas-media-processor-main-old`,
+   name the new folder `sevas-media-processor-main`; if it is now
+   `my_app-old`, name the new folder `my_app`.
+6. Move `settings.json`, the `input` folder and the `output` folder
+   from the old folder into the new folder.
+7. In the new folder, right-click `install.ps1` and choose "Run with
+   PowerShell". (On Windows 11, click "Show more options" to see it.)
+8. Launch the application from the Desktop shortcut. Once it works,
+   delete the old folder.
+
+### Update by hand
+
+1. Rename your current application folder by adding `-old` to the end
+   of its name.
+2. On this project's GitHub page, click the green "Code" button above
+   the file list, then click "Download ZIP" in the menu that opens.
+3. Open your Downloads folder. Right-click the downloaded ZIP file and
+   choose "Extract All...", then click "Extract".
+4. Move the extracted `sevas-media-processor-main` folder to where the
+   old folder is.
+5. Rename the new folder to the old folder's name without the `-old`.
+   For example, if the old folder is now `sevas-media-processor-main-old`,
+   name the new folder `sevas-media-processor-main`; if it is now
+   `my_app-old`, name the new folder `my_app`.
+6. Move `settings.json`, the `input` folder and the `output` folder
+   from the old folder into the new folder.
+7. Open the new folder.
+8. Hold down Shift on your keyboard and Right-Click any empty space inside the folder.
+9. Click "Open PowerShell window here" or "Open in Terminal".
+10. Type this and press Enter to create a virtual environment: `python -m venv venv`
+11. Type one of these two lines and press Enter to install the dependencies.
+    With Python 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
+    With any other Python version: `.\venv\Scripts\python.exe -m pip install -r requirements_no_version.txt`
+12. Launch the application from the Desktop shortcut. Once it works,
+    delete the old folder.
+
+If you cloned with git: `git pull`, delete the `venv` folder, then run
+`install.ps1` again.
 
 ## Your data and the network
 

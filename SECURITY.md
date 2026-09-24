@@ -13,9 +13,10 @@ The `custom` provider can point at any other endpoint, such as an internal
 AI gateway.
 
 It needs **no administrator rights**. It installs no service, writes nothing
-to the registry, and installs no driver. Everything lives in a folder you
-control plus one folder under your own `%APPDATA%`. The setup script does
-more — see "What the installer does" below.
+to the registry, and installs no driver. Everything lives in folders you
+control plus one folder under your own `%APPDATA%`; the one exception is a
+crash log written only if the application cannot start (see "Where your data
+goes"). The setup script does more — see "What the installer does" below.
 
 ## Network activity, in full
 
@@ -23,6 +24,7 @@ more — see "What the installer does" below.
 |---|---|---|
 | AI feature **off** (the default) | nowhere | nothing |
 | AI feature **on**, during a run | the URL in the selected provider's `url` setting — a value you typed | the JPEGs produced from your files, plus your prompt text, plus your API token in the auth header |
+| You click a link in the About dialog | your default web browser opens the project's GitHub page or YouTube channel | the application sends nothing; the browser loads the page |
 | Any other time | nowhere | nothing |
 
 There is exactly **one** place in the entire codebase that opens an outbound
@@ -53,9 +55,10 @@ runtime already present on Windows 10 and 11):
   system picks an unused port. There is no fixed port to find.
 - **A per-launch secret.** A fresh random token is generated at startup and
   handed only to the application's own window. Every request except the
-  page itself and its static assets must present it — as an `X-App-Token`
-  header, or as a `?token=` query parameter on the event stream — or is
-  refused with 403; the open paths are an allowlist. Per-request access
+  page itself and its static assets must present it as an `X-App-Token`
+  header, or is refused with 403; the open paths are an allowlist. Only the
+  event stream, which cannot send headers, accepts it as a `?token=` query
+  parameter instead. Per-request access
   logging is off (errors only), and no log line contains `token=`. —
   `src/routes/web_server.py`, `src/central_logger.py`
 - **The secret is never written into the page.** `src/main.py` pushes it
@@ -76,22 +79,27 @@ runtime already present on Windows 10 and 11):
 | The run database (`application_state.db`, SQLite) | inside that same output folder |
 | API tokens | `%APPDATA%\SevasMediaProcessor\.env` — plain text, guarded by your Windows profile's file permissions (your own account, plus the machine's administrators, as with any file in your profile) |
 | Logs | `%APPDATA%\SevasMediaProcessor\logs` — the newest 30 are kept, older ones deleted at startup |
+| The window's browser data (its cache, and the interface language and translations the page stores) | `%APPDATA%\SevasMediaProcessor\webview` |
 | Settings | `settings.json` in the application folder |
+| A crash log, only if the application cannot start | `MEDIA_PROCESSOR_CRASH_LOG.txt` in the output folder, or the folder above it if the output folder cannot be written; if `settings.json` cannot be read or neither folder can be written, on your Desktop (or in your home folder when there is no Desktop folder) |
 
 API tokens are never written to `settings.json`, never committed to the
 repository, and are shown masked (`********`) in the user interface.
 
 ## Programs it launches
 
-Two. The "Open settings file" button opens `settings.json` in Windows
+Three. The "Open settings file" button opens `settings.json` in Windows
 Notepad (`%SystemRoot%\System32\notepad.exe`) — `src/routes/settings_api.py`.
 The export buttons open Windows Explorer (`%SystemRoot%\explorer.exe`), to
 reveal an exported file and to open the logs folder —
 `src/routes/export_api.py`. Both are launched by their full path, never by
-a bare name Windows would resolve through its search order. Two tests keep
-this section true: one sweeps the source for any program started by bare
-name, the other checks the count and the names above against every
-process-spawning call in the source.
+a bare name Windows would resolve through its search order. The two links in
+the About dialog open in your default web browser, through Python's
+`webbrowser` module — `src/routes/about_api.py`; it opens only the two
+addresses listed in `src/version.py`, and only when you click one. Two tests
+keep this section true: one sweeps the source for any program started by
+bare name, the other checks the count and the names above against every
+program-launching call in the source.
 
 ## Third-party libraries
 
@@ -114,8 +122,9 @@ Pillow (libjpeg, libtiff, libwebp, zlib), `av` (all of FFmpeg),
 
 ## What the installer does
 
-The application changes nothing outside its own folder and `%APPDATA%`.
-The setup script — `install.ps1`, also printed in `README.md` as the
+The application writes only to its own folder, the folders you choose and
+`%APPDATA%\SevasMediaProcessor`, apart from the startup crash log described
+above. The setup script — `install.ps1`, also printed in `README.md` as the
 paste-in block — does more:
 
 - **If a suitable Python is missing** and you approve the prompt, it runs
@@ -148,11 +157,12 @@ page's claims are checked by tests rather than taken on trust.
 From the application folder:
 
 ```
-Get-ChildItem src -Recurse -Filter *.py | Select-String -SimpleMatch "import requests"
+Get-ChildItem src -Recurse -Filter *.py | Select-String -CaseSensitive -Pattern '^\s*(import|from)\s+requests\b'
 ```
 
-names every file that imports the networking library. It returns a single
-line, in `src/llm_client.py`. (The test suite separately checks that
+names every file that imports the networking library, in either Python
+spelling (`import requests` or `from requests import ...`). It returns a
+single line, in `src/llm_client.py`. (The test suite separately checks that
 nothing else in `src/` imports any other network-capable module - raw
 sockets included.)
 
@@ -183,9 +193,10 @@ with `venv\Scripts\python.exe -m playwright install chromium` (without
 it those tests skip), then run
 `venv\Scripts\python.exe -m pytest tests -q` from the application folder.
 
-The full source is a few thousand lines of readable Python with no build step
-and no minified assets. `src/llm_client.py` and `src/routes/web_server.py` are
-the two files worth reading.
+The full source is about ten thousand lines of readable Python, plus the
+interface's HTML and JavaScript, with no build step and no minified assets.
+`src/llm_client.py` and `src/routes/web_server.py` are the two files worth
+reading.
 
 ## Reporting a problem
 

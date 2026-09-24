@@ -12,6 +12,8 @@ from collections.abc import Iterable
 from flask import Flask, Response, request
 from werkzeug.serving import make_server
 
+from .content import ContentPolicy
+
 
 
 @dataclass
@@ -35,6 +37,7 @@ class ProviderServer:
 
     name: str = "provider"
     default_port: int = 0
+    content: ContentPolicy
 
     STALL_SAFETY_SECONDS = 20
 

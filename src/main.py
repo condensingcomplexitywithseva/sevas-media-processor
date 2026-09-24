@@ -22,6 +22,7 @@ import json
 import locale
 
 from fs_utils import get_safe_path
+from user_data import PANIC_LOG_NAME, SETTINGS_FILE_NAME, WEBVIEW_PROFILE_DIR_NAME
 import contextlib
 
 def _read_preboot_locale() -> dict:
@@ -83,20 +84,20 @@ def write_fatal_panic_log(error_details_string: str, app_root: Path | None = Non
 
     panic_log_path = None
     try:
-        settings_file = app_root / "settings.json"
+        settings_file = app_root / SETTINGS_FILE_NAME
         if settings_file.exists():
             with open(settings_file, encoding="utf-8") as sf:
                 data = json.load(sf)
                 if "OUTPUT_FOLDER_PATH" in data:
                     output_dir = Path(data["OUTPUT_FOLDER_PATH"]).resolve()
-                    potential_path = output_dir / "MEDIA_PROCESSOR_CRASH_LOG.txt"
+                    potential_path = output_dir / PANIC_LOG_NAME
                     try:
                         Path(get_safe_path(potential_path.parent)).mkdir(parents=True, exist_ok=True)
                         with open(get_safe_path(potential_path), "a", encoding="utf-8"):
                             pass
                         panic_log_path = potential_path
                     except OSError:
-                        potential_path = output_dir.parent / "MEDIA_PROCESSOR_CRASH_LOG.txt"
+                        potential_path = output_dir.parent / PANIC_LOG_NAME
                         Path(get_safe_path(potential_path.parent)).mkdir(parents=True, exist_ok=True)
                         with open(get_safe_path(potential_path), "a", encoding="utf-8"):
                             pass
@@ -106,11 +107,11 @@ def write_fatal_panic_log(error_details_string: str, app_root: Path | None = Non
 
     if not panic_log_path:
         home_dir = Path.home()
-        desktop_path = home_dir / "Desktop" / "MEDIA_PROCESSOR_CRASH_LOG.txt"
+        desktop_path = home_dir / "Desktop" / PANIC_LOG_NAME
         panic_log_path = (
             desktop_path
             if desktop_path.parent.exists()
-            else home_dir / "MEDIA_PROCESSOR_CRASH_LOG.txt"
+            else home_dir / PANIC_LOG_NAME
         )
 
     try:
@@ -414,9 +415,9 @@ def main():
     def on_closing():
         try:
             import routes.execution_api as exec_api
-            exec_api.abort_flag.set()
-            if exec_api.processing_thread and exec_api.processing_thread.is_alive():
-                exec_api.processing_thread.join(timeout=5.0)
+            exec_api.run_controller.abort.set()
+            if exec_api.run_controller.thread and exec_api.run_controller.thread.is_alive():
+                exec_api.run_controller.thread.join(timeout=5.0)
         except Exception:
             pass
         return True
@@ -426,7 +427,9 @@ def main():
     try:
         import webview
         webview.settings['OPEN_DEVTOOLS_IN_DEBUG'] = False
-        webview.start(localization={'global.quitConfirmation': translated_string}, private_mode=False, debug=False)
+        from config_loader import get_app_data_dir
+        webview.start(localization={'global.quitConfirmation': translated_string}, private_mode=False,
+                      storage_path=str(get_app_data_dir() / WEBVIEW_PROFILE_DIR_NAME), debug=False)
 
         try:
             from central_logger import close_logging

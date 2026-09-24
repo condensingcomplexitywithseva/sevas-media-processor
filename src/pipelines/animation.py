@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from range_parsers import PageRangeSelector
 
 from fs_utils import get_safe_path
-from schemas import Status, RangeStatus, PageResult, FileSummary
+from schemas import Status, PageResult, FileSummary
 from pipelines.base_pipeline import BaseMediaPipeline
 from to_jpeg_converter import ToJpegConverter, is_frame_distinct, open_supported_image
 from range_parsers import calculate_summary_indices
@@ -68,20 +68,15 @@ class AnimationPipeline(BaseMediaPipeline):
                                            f"candidates from {len(pool_indices)} requested")
                     error_summaries.append(compression_message)
                     logger.info(
-                        f"[{self.file_id}] Budget Cap Reached: Compressing "
-                        f"{len(pool_indices)} requested frames down to {extract_count}."
+                        f"[{self.file_id}] Summary: selecting {extract_count} of "
+                        f"{len(pool_indices)} frames."
                     )
-
-                    if range_status == RangeStatus.OK.value:
-                        range_status = RangeStatus.TRUNCATED.value
 
                 selection_indices = calculate_summary_indices(
                     0, len(pool_indices), extract_count
                 ).indices
                 target_indices = [pool_indices[i] for i in selection_indices]
-                range_string = self.page_selector.format_range_string(
-                    target_indices, truncate=False
-                )
+                range_string = self.page_selector.format_range_string(target_indices)
                 sensitivity = self.settings.ANIMATION_SCENE_SENSITIVITY
                 target_set = set(target_indices)
 

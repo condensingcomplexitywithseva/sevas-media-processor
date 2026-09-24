@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,11 @@ import pytest
 SRC = Path(__file__).resolve().parents[2] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+TESTS = Path(__file__).resolve().parents[1]
+if str(TESTS) not in sys.path:
+    sys.path.insert(0, str(TESTS))
+
+from working_folder import fresh_working_folder  # noqa: F401  (registers the autouse fixture)
 
 pytest.importorskip(
     "playwright.sync_api",
@@ -22,26 +28,177 @@ pytest.importorskip(
 
 
 @pytest.fixture(scope="session")
-def browser():
+def _playwright():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
+        yield p
+
+
+class _BrowserKeeper:
+
+    def __init__(self, playwright):
+        self.playwright = playwright
+        self.browser = None
+        self.relaunches = 0
+
+    def live(self):
+        if self.browser is not None and not self.browser.is_connected():
+            self.relaunch("Chromium died during the session")
+        if self.browser is None:
+            try:
+                self.browser = self.playwright.chromium.launch()
+            except Exception as e:
+                pytest.skip(f"Chromium unavailable for Playwright: {e}")
+        return self.browser
+
+    def relaunch(self, reason):
+        if self.browser is not None:
+            with contextlib.suppress(Exception):
+                self.browser.close()
+            self.relaunches += 1
+            logging.getLogger("tests.ui").warning(
+                "%s; relaunching (relaunch %d).", reason, self.relaunches)
+        self.browser = None
+
+    def close(self):
+        if self.browser is not None and self.browser.is_connected():
+            self.browser.close()
+
+
+VIEWPORT = {"width": 1400, "height": 900}
+_CRASH_SIGNS = ("Target crashed", "has been closed")
+
+
+def new_page_with_one_retry(keeper):
+    try:
+        return keeper.live().new_page(viewport=VIEWPORT)
+    except Exception as error:
+        if not any(sign in str(error) for sign in _CRASH_SIGNS):
+            raise
+        keeper.relaunch(f"page open failed ({error})")
+        return keeper.live().new_page(viewport=VIEWPORT)
+
+
+UI_BROWSER_SLOTS = 6
+
+UI_TEST_TIMEOUT_SECONDS = 180
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    ui_dir = Path(__file__).resolve().parent
+    by_file: dict[Path, list] = {}
+    for item in items:
+        path = Path(str(item.path)).resolve()
+        if path.parent == ui_dir:
+            by_file.setdefault(path, []).append(item)
+    loads = [0] * UI_BROWSER_SLOTS
+    for path in sorted(by_file, key=lambda p: (-len(by_file[p]), p.name)):
+        slot = loads.index(min(loads))
+        loads[slot] += len(by_file[path])
+        for item in by_file[path]:
+            item.add_marker(pytest.mark.xdist_group(f"ui-{slot}"))
+            if item.get_closest_marker("timeout") is None:
+                item.add_marker(pytest.mark.timeout(UI_TEST_TIMEOUT_SECONDS))
+
+
+@pytest.fixture(scope="session")
+def _browser_keeper(_playwright):
+    keeper = _BrowserKeeper(_playwright)
+    yield keeper
+    keeper.close()
+
+
+class _ServerDrain:
+
+    def __init__(self, server, broadcaster):
+        self.server = server
+        self.broadcaster = broadcaster
+        self.closing = threading.Event()
+        self.condition = threading.Condition()
+        self.active = 0
+        self.closed = False
+        dispatch = server.process_request
+        process = server.process_request_thread
+        application = server.app
+
+        def dispatch_tracked(*args):
+            with self.condition:
+                self.active += 1
+            try:
+                dispatch(*args)
+            except BaseException:
+                self.finished()
+                raise
+
+        def process_tracked(*args):
+            try:
+                process(*args)
+            finally:
+                self.finished()
+
+        def stop_stream(environ, start_response):
+            response = application(environ, start_response)
+            try:
+                for chunk in response:
+                    if environ.get('PATH_INFO') == '/api/process/stream' and self.closing.is_set():
+                        break
+                    yield chunk
+            finally:
+                if hasattr(response, 'close'):
+                    response.close()
+
+        server.process_request = dispatch_tracked
+        server.process_request_thread = process_tracked
+        server.app = stop_stream
+        self.thread = threading.Thread(target=server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def finished(self):
+        with self.condition:
+            self.active -= 1
+            self.condition.notify_all()
+
+    def wait_for_requests(self):
+        deadline = time.monotonic() + 10
+        with self.condition:
+            while self.active:
+                self.broadcaster.emit({'type': 'test_shutdown'})
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(f'{self.active} UI fixture requests did not finish')
+                self.condition.wait(min(0.05, remaining))
+
+    def close(self):
+        if self.closed:
+            return
+        self.server.shutdown()
+        self.closing.set()
         try:
-            b = p.chromium.launch()
-        except Exception as e:
-            pytest.skip(f"Chromium unavailable for Playwright: {e}")
-        yield b
-        b.close()
+            self.wait_for_requests()
+        finally:
+            self.server.server_close()
+            self.thread.join(timeout=2)
+        self.closed = True
 
 
 @pytest.fixture
-def app_server(tmp_path, monkeypatch):
+def server_drains():
+    return []
+
+
+@pytest.fixture
+def app_server(tmp_path, monkeypatch, server_drains):
     import central_logger
     import config_loader
     from config_loader import ConfigManager, TokenManager
     from werkzeug.serving import make_server
 
-    servers = []
+    from routes import execution_api
+    monkeypatch.setattr(execution_api, "run_controller", execution_api.RunController())
+
+    servers = server_drains
 
     monkeypatch.setattr(central_logger, "get_app_data_dir", lambda: tmp_path)
     monkeypatch.setattr(central_logger, "_configured", False)
@@ -98,23 +255,24 @@ def app_server(tmp_path, monkeypatch):
         from routes.web_server import create_app
 
         server = make_server("127.0.0.1", 0, create_app(), threaded=True)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        servers.append(server)
+        servers.append(_ServerDrain(server, central_logger.global_broadcaster))
         return f"http://127.0.0.1:{server.server_port}"
 
     yield start
-    _restore_logging()
-    for s in servers:
-        s.shutdown()
+    try:
+        for server in servers:
+            server.close()
+    finally:
+        _restore_logging()
 
 
 @pytest.fixture
-def open_page(browser, app_server):
+def open_page(_browser_keeper, app_server):
     pages = []
 
     def open_(settings_overrides, raw_settings=None, tokens=None, deliver_token=True):
         url = app_server(settings_overrides, raw_settings=raw_settings, tokens=tokens)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        page = new_page_with_one_retry(_browser_keeper)
         page.goto(url)
 
         if deliver_token:
@@ -138,4 +296,5 @@ def open_page(browser, app_server):
 
     yield open_
     for p in pages:
-        p.close()
+        with contextlib.suppress(Exception):
+            p.close()

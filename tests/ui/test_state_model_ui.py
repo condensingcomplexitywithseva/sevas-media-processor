@@ -57,15 +57,17 @@ def test_unparseable_number_survives_apply_and_shows_error(open_page):
 
 
 def test_checkbox_group_and_dual_prompt_discard_roundtrip(open_page):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"})
+    disk_prompt = "the prompt that is on disk"
+    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama",
+                      "LLM_USER_PROMPT": disk_prompt})
 
     page.evaluate("window.switchTab('general')")
     page.wait_for_timeout(400)
-    page.check('input[name="NO_RETRY_STATUSES"][value="failure"]')
+    page.check('input[name="NO_RETRY_STATUSES"][value="fail"]')
     page.wait_for_timeout(200)
     assert page.evaluate("window.hasUnsavedEdits()")
     assert page.evaluate(
-        """document.querySelector('input[name="NO_RETRY_STATUSES"][value="failure"]')
+        """document.querySelector('input[name="NO_RETRY_STATUSES"][value="fail"]')
                .classList.contains('dirty-field')"""
     ), "the toggled box must carry the dirty marker"
 
@@ -82,14 +84,14 @@ def test_checkbox_group_and_dual_prompt_discard_roundtrip(open_page):
             unsaved: window.hasUnsavedEdits(),
             apply_disabled: document.getElementById('btn-apply').disabled,
             prompt: document.getElementById('user_text_input').value,
-            failure_checked: document.querySelector('input[name="NO_RETRY_STATUSES"][value="failure"]').checked,
+            failure_checked: document.querySelector('input[name="NO_RETRY_STATUSES"][value="fail"]').checked,
             ok_checked: document.querySelector('input[name="NO_RETRY_STATUSES"][value="ok"]').checked,
             dirty_count: document.querySelectorAll('.dirty-field').length,
         })"""
     )
     assert not state["unsaved"], "Discard must return to the clean state"
     assert state["apply_disabled"]
-    assert state["prompt"] == "Please accurately extract and transcribe all text from these images.", \
+    assert state["prompt"] == disk_prompt, \
         "the prompt textarea must revert to the disk value"
     assert not state["failure_checked"], "the toggled box must revert"
     assert state["ok_checked"], "the originally-checked box must stay"
@@ -153,7 +155,7 @@ def test_apply_normalizes_spelling_on_disk(open_page, tmp_path):
     page.fill('input[name="JPEG_QUALITY"]', "077")
     page.wait_for_timeout(200)
     page.click("#btn-apply")
-    page.wait_for_function("document.getElementById('btn-apply').disabled")
+    page.wait_for_function("!window.settingsSavePending && document.getElementById('btn-apply').disabled")
 
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["JPEG_QUALITY"] == 77, "the backend must store the normalized integer"

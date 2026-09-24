@@ -107,13 +107,13 @@ def hdr_signal_from_yuv(arr, bit_depth, full_range):
     return np.clip(np.stack([r, g, b], axis=-1), 0, 1)
 
 
-def hlg_eotf(signal, gamma=HLG_SYSTEM_GAMMA):
+def hlg_eotf(signal):
     scene = np.where(signal <= 0.5,
                      signal * signal / 3.0,
                      (np.exp((signal - HLG_C) / HLG_A) + HLG_B) / 12.0)
     ys = (0.2627 * scene[..., 0] + 0.6780 * scene[..., 1]
           + 0.0593 * scene[..., 2])
-    return scene * (np.maximum(ys, 1e-6) ** (gamma - 1.0))[..., None]
+    return scene * (np.maximum(ys, 1e-6) ** (HLG_SYSTEM_GAMMA - 1.0))[..., None]
 
 
 def pq_eotf(signal):
@@ -207,6 +207,13 @@ class VideoPipeline(BaseMediaPipeline):
 
                 hdr_transfer = detect_hdr_transfer(video_stream.codec_context)
                 hdr_fallback_active = False
+                if hdr_transfer:
+                    logger.info(
+                        f"HDR video ({hdr_transfer}) detected in "
+                        f"{self.relative_path}: frames are tone-mapped, so "
+                        "this file is noticeably slower per frame. Not a "
+                        "hang; Stop still works."
+                    )
 
                 fps, total_frames, content_end_sec, err_msg = self._validate_metadata(
                     video_stream
@@ -267,7 +274,7 @@ class VideoPipeline(BaseMediaPipeline):
                 if range_details:
                     error_summaries.append(range_details)
 
-                range_string = self.video_selector.format_time_range(target_times, truncate=False)
+                range_string = self.video_selector.format_time_range(target_times)
 
                 if not target_times:
                     return self.finalize_results(

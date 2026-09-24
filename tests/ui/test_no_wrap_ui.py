@@ -71,3 +71,16 @@ def test_failed_apply_banner_fits_on_one_line(open_page):
     assert unsaved_variant, "sanity: this scenario must exercise the msg_resolve_errors wording"
 
     assert_banner_rows_single_line(page, "failed apply", expected_rows=2)
+
+
+
+def test_persistent_notice_rows_fit_in_every_locale(open_page):
+    page = open_page({})
+    page.set_viewport_size({"width": APP_WIDTH, "height": APP_HEIGHT})
+    page.evaluate("""() => {
+        notice({id:'start', key:'err_resume_old_database', field:'START_OVER',
+            summaryKey:'notice_start_setting'});
+        notice({id:'logs', key:'notice_log_failed'});
+        notice({id:'export', key:'notice_reports_failed'});
+    }""")
+    assert_banner_rows_single_line(page, 'independent operation notices', 3)

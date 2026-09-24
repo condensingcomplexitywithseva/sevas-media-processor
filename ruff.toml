@@ -15,5 +15,10 @@ allowed-confusables = ["е", "р", "о", "с", "К", "Н", "а", "х", "у", "и
 
 [lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S311", "E402"]
+"src/schemas.py" = ["S105"]
+"src/data_exporter.py" = ["S608"]
+"src/db_controller.py" = ["S608"]
+"tests/test_db_contracts.py" = ["S608"]
 "tests/test_fake_llm_client_integration.py" = ["F811"]
 "tests/test_llm_client_cruelty.py" = ["F811"]
+"tests/test_llm_json_ladder.py" = ["F811"]

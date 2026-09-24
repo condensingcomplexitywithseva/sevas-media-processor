@@ -92,6 +92,27 @@ def test_crashed_run_ends_with_failed_never_done(make_settings, monkeypatch):
     assert_shutdown_released_the_db(settings)
 
 
+def test_export_failure_keeps_processing_outcome_and_reports_saved_inventory(make_settings, monkeypatch):
+    import data_exporter
+    settings = make_settings()
+    events = []
+    core = ProcessorCore(settings, threading.Event(), on_progress=events.append)
+    monkeypatch.setattr(core.orchestrator, "execute_batch_processing_loop", lambda **kwargs: None)
+
+    def fail_workbook(*args, **kwargs):
+        raise RuntimeError("Workbook save failed")
+
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "_workbook", fail_workbook)
+    core.run()
+    assert events[-1] == {"type": "done"}
+    reports = [event for event in events if event["type"] == "export_result"]
+    assert len(reports) == 1 and reports[0]["status"] == "error"
+    assert len(reports[0]["saved"]) == 3
+    assert reports[0]["failed"][0]["report"] == "Workbook"
+    assert reports[0]["recovery_id"]
+    assert_shutdown_released_the_db(settings)
+
+
 
 def test_start_over_archives_the_previous_run_with_a_suffix_on_collision(
     make_settings, monkeypatch, tmp_path
@@ -412,3 +433,30 @@ def test_the_refusal_blames_the_shell_failure_when_both_routes_fail(
     detail = str(raised.value)
     assert str(Path(str(settings.CURRENT_RUN_FOLDER))) in detail
     assert "\\\\" not in detail and "'" not in detail
+
+
+
+def test_unconfirmed_automatic_export_keeps_processing_done_and_source(make_settings, monkeypatch):
+    settings = make_settings()
+    events = []
+    core = ProcessorCore(settings, threading.Event(), on_progress=events.append)
+    monkeypatch.setattr(core.orchestrator, "execute_batch_processing_loop", lambda **kwargs: None)
+    original = core.exporter.export_all_formats
+
+    def lose_result(destination):
+        original(destination)
+        raise RuntimeError("Lost completed export result")
+
+    monkeypatch.setattr(core.exporter, "export_all_formats", lose_result)
+    core.run()
+    assert events[-1] == {"type": "done"}
+    result, = [event for event in events if event["type"] == "export_result"]
+    assert isinstance(result["export_revision"], int) and result["export_revision"] > 0
+    assert result["export_state"] == "unknown"
+    assert result["message_key"] == "err_export_outcome_unknown"
+    assert result["detail"] == "Lost completed export result"
+    assert "saved" not in result and "failed" not in result
+    assert result["recovery_id"]
+    assert result["path"] == str(settings.TECH_FOLDER_PATH)
+    assert list(settings.TECH_FOLDER_PATH.glob("*.xlsx"))
+    assert_shutdown_released_the_db(settings)

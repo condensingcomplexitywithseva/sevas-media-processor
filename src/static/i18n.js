@@ -4,7 +4,11 @@
 let currentTranslations = {};
 
 window.getT = function(key, fallback) {
-    return window.currentTranslations && window.currentTranslations[key] ? window.currentTranslations[key] : fallback;
+    const translated = window.currentTranslations && window.currentTranslations[key];
+    if (typeof translated === 'string' && translated) return translated;
+    if (typeof fallback === 'string') return fallback;
+    console.error('Missing translation:', key);
+    return window.currentTranslations && window.currentTranslations.msg_translation_missing || 'Message unavailable.';
 };
 
 window.normalizeLang = function(raw) {
@@ -52,6 +56,9 @@ async function changeLanguage(lang) {
         localStorage.setItem('translations_' + lang, JSON.stringify(currentTranslations));
 
         applyTranslations();
+        if (window.exportOutcome && typeof window.showExportOutcome === 'function') {
+            window.showExportOutcome(window.exportOutcome);
+        }
         if (typeof window.renderErrors === 'function') window.renderErrors();
         if (typeof window.updateGlobalControls === 'function') window.updateGlobalControls();
 
@@ -77,6 +84,7 @@ function applyTranslations(root = document) {
         }
     }
 
+    const references = [];
     root.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
         if (window.currentTranslations && window.currentTranslations[key]) {
@@ -89,6 +97,10 @@ function applyTranslations(root = document) {
                         text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), v);
                     }
                 } catch (e) {}
+            }
+            if (window.renderMessage && (el.dataset.i18nRefs || window.MESSAGE_REFERENCES[key])) {
+                references.push({el, key});
+                return;
             }
             let escapedText = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             let formattedText;
@@ -110,6 +122,9 @@ function applyTranslations(root = document) {
             }
         }
     });
+
+    references.forEach(({el, key}) => window.renderMessage(el,
+        {key, refs: el.dataset.i18nRefs ? JSON.parse(el.dataset.i18nRefs) : {}}));
 
     root.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
         const key = el.getAttribute('data-i18n-placeholder');

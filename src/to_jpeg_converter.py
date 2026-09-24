@@ -45,6 +45,8 @@ SUPPORTED_OPEN_FORMATS = (
     "JPEG", "PNG", "BMP", "DIB", "TIFF", "GIF", "WEBP", "HEIF", "AVIF",
 )
 
+DENSITY_ASPECT_TOLERANCE = 0.02
+
 
 def open_supported_image(path: str | Path) -> Image.Image:
     _lazy_load_image_plugins()
@@ -113,6 +115,8 @@ class ToJpegConverter:
         try:
             exif_data = current.getexif()
 
+            density = self._read_pixel_density(current)
+
             orientation = exif_data.get(274) if exif_data is not None else None
             if orientation is not None and orientation not in range(1, 9):
                 orientation_warning = (
@@ -156,6 +160,8 @@ class ToJpegConverter:
                 if transposed is not current:
                     temp_images.append(transposed)
                     current = transposed
+                if density is not None and orientation in (5, 6, 7, 8):
+                    density = (density[1], density[0])
             except Exception as e:
                 msg = (
                     f"Non-fatal error: EXIF Rotation bypassed: {e!s}"
@@ -164,6 +170,28 @@ class ToJpegConverter:
                     f"[{output_path.name}] - {msg}", exc_info=True
                 )
                 warnings.append(msg)
+
+            if density is not None:
+                x_density, y_density = density
+                ratio = x_density / y_density
+                if abs(ratio - 1.0) > DENSITY_ASPECT_TOLERANCE:
+                    width, height = current.size
+                    if ratio > 1.0:
+                        new_size = (width, max(1, round(height * ratio)))
+                        axis, factor = "height", ratio
+                    else:
+                        new_size = (max(1, round(width / ratio)), height)
+                        axis, factor = "width", 1.0 / ratio
+                    stretched = current.resize(
+                        new_size, Image.Resampling.LANCZOS
+                    )
+                    if stretched is not current:
+                        temp_images.append(stretched)
+                        current = stretched
+                    warnings.append(
+                        f"Aspect corrected using {x_density:g}x{y_density:g} "
+                        f"dpi metadata ({axis} stretched {factor:.2f}x)"
+                    )
 
             if self.max_dimension_limit and self.max_dimension_limit > 0:
                 width, height = current.size
@@ -278,6 +306,21 @@ class ToJpegConverter:
             for temp_img in temp_images:
                 with contextlib.suppress(Exception):
                     temp_img.close()
+
+    @staticmethod
+    def _read_pixel_density(image: Image.Image) -> tuple[float, float] | None:
+        pair = image.info.get("dpi") or image.info.get("resolution")
+        if pair is None and image.info.get("jfif_unit") == 0:
+            pair = image.info.get("jfif_density")
+        if pair is None:
+            return None
+        try:
+            x_density, y_density = float(pair[0]), float(pair[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if x_density <= 0 or y_density <= 0:
+            return None
+        return x_density, y_density
 
     def _bake_wide_gamut_to_srgb(
         self, image: Image.Image, output_path: Path, warnings: list

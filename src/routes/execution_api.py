@@ -6,80 +6,132 @@ import threading
 import queue
 import logging
 import json
-from flask import Blueprint, jsonify, Response
-
+import uuid
+from schemas import exception_message
+from flask import Blueprint, jsonify, Response, request
 from app_context import ProcessorCore
 from central_logger import global_broadcaster
 
 execution_bp = Blueprint("execution", __name__)
 
-processing_thread = None
-abort_flag = threading.Event()
 
-_start_lock = threading.Lock()
+class RunController:
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.thread: threading.Thread | None = None
+        self.abort = threading.Event()
+        self.run_id = ""
+        self.revision = 0
+        self.phase = "idle"
+        self.progress = 0
+        self.terminal: dict = {}
+        self.export_barrier = 0
+        self.export_result: dict | None = None
+
+    @property
+    def active(self):
+        return self.phase in ("starting", "running", "stopping")
+
+    def snapshot(self):
+        return {"run_id": self.run_id, "revision": self.revision, "phase": self.phase,
+                "progress": self.progress, "is_running": self.active,
+                "is_stopping": self.phase == "stopping", "terminal": self.terminal,
+                "export_barrier": self.export_barrier, "export_result": self.export_result}
+
+    def emit(self, run_id, event):
+        with self.lock:
+            if run_id != self.run_id or not self.active:
+                return
+            kind = event.get("type")
+            if kind in ("done", "aborted", "failed"):
+                self.terminal = dict(event)
+                return
+            if kind == "progress":
+                self.progress = event["value"]
+            elif kind == "export_result":
+                self.export_result = dict(event)
+            self.revision += 1
+            global_broadcaster.emit({**event, "run_state": self.snapshot()})
+
+    def worker(self, core, run_id, abort):
+        try:
+            core.run()
+        except Exception as error:
+            logging.getLogger("Orchestrator.Worker").exception("FATAL ERROR in processing worker")
+            with self.lock:
+                if run_id == self.run_id:
+                    self.terminal = {"type": "failed", **exception_message(error)}
+        finally:
+            with self.lock:
+                if run_id == self.run_id:
+                    self.phase = self.terminal.get("type", "aborted" if abort.is_set() else "done")
+                    self.terminal = {**self.terminal, "type": self.phase}
+                    self.revision += 1
+                    global_broadcaster.emit({**self.terminal, "run_state": self.snapshot()})
+
+    def stop(self, run_id):
+        with self.lock:
+            if run_id != self.run_id or not self.active:
+                return False, self.snapshot()
+            self.abort.set()
+            self.phase = "stopping"
+            self.revision += 1
+            snapshot = self.snapshot()
+            global_broadcaster.emit({"type": "run_state", "run_state": snapshot})
+            return True, snapshot
 
 
-def _background_worker(core: ProcessorCore, current_abort_flag: threading.Event):
-    try:
-        core.run()
-    except Exception:
-        logging.getLogger("Orchestrator.Worker").exception("FATAL ERROR in processing worker")
-        global_broadcaster.emit({"type": "failed"})
+run_controller = RunController()
 
 
 @execution_bp.route("/start", methods=["POST"])
 def start_processing():
-    global processing_thread, abort_flag
-    with _start_lock:
-        return _start_processing_locked()
-
-
-def _start_processing_locked():
-    global processing_thread, abort_flag
-    if processing_thread and processing_thread.is_alive():
-        return jsonify({
-            "status": "error",
-            "message": "Processing is already running.",
-            "message_key": "err_run_active"
-        }), 400
-
-    try:
-        abort_flag.clear()
-        from config_loader import load_strict
-
-        core = ProcessorCore(load_strict(), abort_flag, on_progress=global_broadcaster.emit)
-
-    except Exception as e:
-        from config_loader import load_for_ui
-
-        _, errors = load_for_ui()
-        return jsonify({"status": "error", "message": str(e), "errors": errors}), 400
-
-    processing_thread = threading.Thread(
-        target=_background_worker, args=(core, abort_flag), daemon=True
-    )
-    processing_thread.start()
-    return jsonify({"status": "success", "message": "Processing started."}), 200
+    controller = run_controller
+    with controller.lock:
+        if controller.active:
+            return jsonify({"status": "error", "message": "Processing is already running.",
+                            "message_key": "err_run_active", "run_state": controller.snapshot()}), 400
+        run_id = request.headers.get("X-Run-Id") or str(uuid.uuid4())
+        if run_id == controller.run_id:
+            return jsonify({"status": "success", "run_state": controller.snapshot(),
+                            "export_barrier": controller.export_barrier}), 200
+        abort = threading.Event()
+        try:
+            from config_loader import load_strict
+            core = ProcessorCore(load_strict(), abort,
+                                 on_progress=lambda event: controller.emit(run_id, event))
+        except Exception as error:
+            from config_loader import load_for_ui
+            _, errors = load_for_ui()
+            return jsonify({**exception_message(error), "errors": errors,
+                            "run_state": controller.snapshot()}), 400
+        from routes.export_api import advance_export_revision
+        controller.run_id, controller.abort = run_id, abort
+        controller.phase, controller.progress, controller.terminal = "running", 0, {}
+        controller.export_result = None
+        controller.export_barrier = advance_export_revision()
+        controller.revision += 1
+        controller.thread = threading.Thread(target=controller.worker, args=(core, run_id, abort), daemon=True)
+        controller.thread.start()
+        snapshot = controller.snapshot()
+        global_broadcaster.emit({"type": "run_state", "run_state": snapshot})
+        return jsonify({"status": "success", "message": "Processing started.",
+                        "export_barrier": controller.export_barrier, "run_state": snapshot}), 200
 
 
 @execution_bp.route("/stop", methods=["POST"])
 def stop_processing():
-    global processing_thread, abort_flag
-    if not processing_thread or not processing_thread.is_alive():
-        return jsonify({"status": "error", "message": "No active process to stop."}), 400
-    abort_flag.set()
-    return (
-        jsonify({"status": "success", "message": "Stop signal sent. Waiting for clean exit."}),
-        200,
-    )
+    accepted, snapshot = run_controller.stop(request.headers.get("X-Run-Id", ""))
+    return jsonify({"status": "success" if accepted else "error", "run_state": snapshot,
+                    "message": "Stop signal sent." if accepted else "No matching active run to stop."}), (
+                        200 if accepted else 409)
 
 
 @execution_bp.route("/status", methods=["GET"])
 def get_status():
-    global processing_thread, abort_flag
-    is_running = processing_thread is not None and processing_thread.is_alive()
-    is_stopping = is_running and abort_flag.is_set()
-    return jsonify({"is_running": is_running, "is_stopping": is_stopping}), 200
+    with run_controller.lock:
+        return jsonify(run_controller.snapshot()), 200
 
 
 @execution_bp.route("/stream", methods=["GET"])

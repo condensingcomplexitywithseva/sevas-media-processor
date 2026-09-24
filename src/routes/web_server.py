@@ -9,14 +9,17 @@ from routes.execution_api import execution_bp
 from routes.export_api import exports_bp
 from routes.about_api import about_bp
 from config_loader import (Settings, ROOT_DIR, get_env_file_path, get_masked_env_tokens,
-                           get_app_data_dir, get_settings_path)
-from config_validator import ProviderConfig
+                           get_app_data_dir, get_settings_path, settings_transaction)
+from config_validator import ProviderConfig, settings_form_view, settings_form_repair_fields
 from version import APP_VERSION, APP_LINKS
+from schemas import MESSAGE_REFERENCES
 
 SESSION_TOKEN = secrets.token_urlsafe(32)
 
 OPEN_PATHS = ("/",)
 OPEN_PREFIXES = ("/static/",)
+
+QUERY_TOKEN_PATHS = ("/api/process/stream",)
 
 
 def is_open_path(path: str) -> bool:
@@ -74,6 +77,22 @@ def create_app():
     app.register_blueprint(exports_bp, url_prefix='/api/export')
     app.register_blueprint(about_bp, url_prefix='/api/about')
 
+    @app.after_request
+    def _message_envelope(response):
+        if not response.is_json or request.path.startswith('/api/locales/'):
+            return response
+        data = response.get_json()
+        if not isinstance(data, dict):
+            return response
+        if data.get('preview_type') == 'error':
+            data['message_key'] = data.pop('content')
+            data['status'] = 'error'
+        if not any(key in data for key in ('message', 'message_key', 'error', 'errors')):
+            return response
+        from schemas import message_envelope
+        response.set_data(app.json.dumps(message_envelope(data)))
+        return response
+
     @app.before_request
     def _enforce_local_api_auth():
         host_name = (request.host or "").split(":")[0].lower()
@@ -81,18 +100,23 @@ def create_app():
             return jsonify({"error": "Forbidden"}), 403
 
         if not is_open_path(request.path):
-            supplied = request.headers.get("X-App-Token") or request.args.get("token") or ""
+            supplied = request.headers.get("X-App-Token") or ""
+            if not supplied and request.path in QUERY_TOKEN_PATHS:
+                supplied = request.args.get("token") or ""
             if not secrets.compare_digest(supplied, SESSION_TOKEN):
                 return jsonify({"error": "Forbidden"}), 403
 
 
 
     @app.route('/')
+    @settings_transaction()
     def index():
         field_meta, provider_field_kinds = build_field_meta()
 
-        from config_loader import load_for_ui
+        from config_loader import load_for_ui, settings_operations
         merged_settings, initial_errors = load_for_ui()
+        repair_fields = settings_form_repair_fields(merged_settings)
+        merged_settings = settings_form_view(merged_settings)
         env_path_str = str(get_env_file_path())
         log_path_str = str(get_app_data_dir() / "logs")
 
@@ -104,9 +128,13 @@ def create_app():
             'main.html',
             settings=merged_settings,
             current_settings=current_settings,
+            repair_fields=repair_fields,
+            settings_epoch=settings_operations().epoch,
+            settings_revision=settings_operations().revision,
             default_settings=Settings().model_dump(mode='json'),
             active_tab='general',
             translations=translations,
+            message_references=MESSAGE_REFERENCES,
             available_locales=get_available_locales(translations),
             env_tokens=get_masked_env_tokens(),
             env_path=env_path_str,

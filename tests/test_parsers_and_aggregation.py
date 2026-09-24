@@ -61,6 +61,27 @@ def test_format_range_string_roundtrip():
     assert PageRangeSelector.format_range_string([0, 1, 2, 4]) == "1-3, 5"
 
 
+@pytest.mark.parametrize("fragment_count", [10, 11, 25, 1001])
+def test_page_range_format_preserves_every_fragment(fragment_count):
+    indices = list(range(0, fragment_count * 2, 2))
+    expected = ", ".join(str(index + 1) for index in indices)
+    formatted = PageRangeSelector.format_range_string(list(reversed(indices)))
+    assert formatted == expected
+    assert PageRangeSelector(formatted).calculate_indices(indices[-1] + 1).indices == indices
+
+
+@pytest.mark.parametrize("fragment_count", [10, 11, 25, 1001])
+def test_time_range_format_preserves_every_fragment(fragment_count):
+    times = [float(start + offset) for start in range(0, fragment_count * 10, 10)
+             for offset in (0, 1)]
+    expected = ", ".join(
+        f"{start // 3600:02}:{start // 60 % 60:02}:{start % 60:02}-"
+        f"{(start + 1) // 3600:02}:{(start + 1) // 60 % 60:02}:{(start + 1) % 60:02}"
+        for start in range(0, fragment_count * 10, 10)
+    )
+    assert VideoSelector.format_time_range(list(reversed(times))) == expected
+
+
 
 def test_video_selector_strict_format():
     with pytest.raises(ConfigurationError):
@@ -106,7 +127,7 @@ def test_video_out_of_bounds_skipped():
 class _Dummy(BaseMediaPipeline):
     def process(self):
         yield from ()
-        return FileSummary(0, "", Status.OK.value, Status.OK.value, "")
+        return FileSummary(0, "", Status.OK.value, "")
 
 
 def _finalize(expected, ok, skipped, failed):
@@ -115,24 +136,30 @@ def _finalize(expected, ok, skipped, failed):
                                   10, "1-10", RangeStatus.OK.value, [])
 
 
-def test_aggregate_all_ok():
-    assert _finalize(5, 5, 0, 0).final_aggregate_status == Status.OK.value
+
+def test_aggregate_all_ok_comment():
+    assert _finalize(5, 5, 0, 0).file_to_jpegs_comment == \
+        "Successfully saved all 5 requested frames"
 
 
-def test_aggregate_ok_with_skips():
-    assert _finalize(5, 3, 2, 0).final_aggregate_status == Status.OK.value
+def test_aggregate_ok_with_skips_comment():
+    assert _finalize(5, 3, 2, 0).file_to_jpegs_comment == \
+        "Processed 5 candidates: 3 saved, 2 skipped (static/duplicate)"
 
 
-def test_aggregate_partial_failure():
-    assert _finalize(5, 3, 0, 2).final_aggregate_status == Status.PARTIAL_FAILURE.value
+def test_aggregate_partial_failure_comment():
+    assert _finalize(5, 3, 0, 2).file_to_jpegs_comment == \
+        "Target 5 candidates: 3 saved, 0 skipped, 2 failed"
 
 
-def test_aggregate_total_failure():
-    assert _finalize(5, 0, 0, 5).final_aggregate_status == Status.FAILURE.value
+def test_aggregate_total_failure_comment():
+    assert _finalize(5, 0, 0, 5).file_to_jpegs_comment == \
+        "All 5 candidates failed to process"
 
 
-def test_aggregate_zero_expected_is_skip_not_failure():
-    assert _finalize(0, 0, 0, 0).final_aggregate_status == Status.SKIPPED.value
+def test_aggregate_zero_expected_reads_as_a_skip():
+    assert _finalize(0, 0, 0, 0).file_to_jpegs_comment == \
+        "Configured range does not overlap this file; nothing was extracted"
 
 
 def test_aggregate_comment_deduplicates_repeated_errors():
@@ -141,4 +168,4 @@ def test_aggregate_comment_deduplicates_repeated_errors():
         3, 0, 0, 3, 10, "1-3", RangeStatus.OK.value,
         ["Render error: boom", "Render error: boom", "Render error: boom"],
     )
-    assert summary.final_aggregate_comment.count("Render error: boom") == 1
+    assert summary.file_to_jpegs_comment.count("Render error: boom") == 1

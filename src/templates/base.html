@@ -16,6 +16,7 @@
             --bg-color: #f3f2f1;
             --text-color: #000000;
             --hint-color: #555555;
+            --ui-hint-size: 0.8rem;
             --header-color: #005599;
             --border-color: #ccc;
             --error-color: #D32F2F;
@@ -157,7 +158,7 @@
         .btn-default { padding: 12px 14px; height: auto; cursor: pointer; border: 1px solid var(--border-color); background: #f8f9fa; border-radius: 8px; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; color: var(--hint-color); flex-shrink: 0; font-weight: bold; width: auto; transition: all 0.15s ease; }
         .btn-default:hover { background: #e2e6ea; color: var(--header-color); }
 
-        .hint { font-size: 0.8rem; color: #64748b; margin-top: 6px; display: block; line-height: 1.4; white-space: pre-wrap; }
+        .hint { font-size: var(--ui-hint-size); color: #64748b; margin-top: 6px; display: block; line-height: 1.4; white-space: pre-wrap; }
 
         .i18n-line { display: block; }
         .i18n-line:empty::before { content: "\00a0"; }
@@ -166,13 +167,13 @@
         .i18n-text { flex: 1 1 auto; min-width: 0; }
 
         .settings-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .error-text { color: var(--error-color); font-weight: bold; font-size: 0.9em; margin-top: 5px; display: block; min-height: 1.2em; }
+        .error-text, .export-error { color: var(--error-color); font-weight: bold; font-size: 0.9em; margin-top: 5px; display: block; min-height: 1.2em; }
         .section-header { color: #1e293b; font-weight: bold; font-size: 1.1em; margin-top: 18px; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); }
 
         .dirty-field { background-color: #fffde7 !important; border-color: #fbc02d !important; box-shadow: 0 0 5px rgba(251, 192, 45, 0.3) !important; transition: all 0.2s; }
         .error-field { border-color: var(--error-color) !important; background-color: #ffebee !important; }
 
-        .banner-tab-link { color: inherit; font-weight: bold; text-decoration: underline; cursor: pointer; }
+        .banner-tab-link { display: inline-block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; color: inherit; font-weight: bold; text-decoration: underline; cursor: pointer; }
         .banner-tab-link:hover { color: #8e0000; }
 
         @keyframes errorFlash {
@@ -191,7 +192,7 @@
         #run-status.status-failed { color: var(--error-color); }
         #run-status.status-aborted { color: #e67e22; }
 
-        #save-toast, #error-toast {
+        #generic-toast {
             position: fixed; 
             top: 20px; 
             left: 50%;
@@ -206,8 +207,8 @@
             font-weight: bold;
         }
 
-        #save-toast { background: #4CAF50; }
-        #error-toast { background: var(--error-color); }
+        #generic-toast { background: #4CAF50; max-width: calc(100vw - 64px); overflow-wrap: anywhere; }
+        #generic-toast.toast-visible { opacity: 1; }
 
         #modal-overlay {
             display: none;
@@ -240,7 +241,8 @@
             font-family: monospace;
             font-size: 0.9em;
             user-select: all;
-            word-break: break-all;
+
+            overflow-wrap: anywhere;
             max-height: 30vh;
             overflow-y: auto;
         }
@@ -263,6 +265,15 @@
             white-space: pre-wrap;
             word-break: break-word;
             margin-bottom: 20px;
+        }
+
+        #modal-jump {
+            display: none;
+            margin: -10px 0 20px;
+            font-size: 0.98rem;
+        }
+        #modal-dialog.with-path #modal-jump {
+            margin-top: 12px;
         }
         #modal-buttons { display: flex; justify-content: flex-end; gap: 10px; }
         #modal-buttons button {
@@ -339,6 +350,88 @@
             border: none;
         }
         #about-buttons button:hover { background-color: #0068ba; }
+
+        [hidden] { display: none !important; }
+        #persistent-notices { display: contents; }
+        #persistent-notices .banner-row > span { min-width: 0; }
+        #modal-dialog, #about-dialog { max-height: calc(100vh - 96px); overflow-y: auto; }
+        #modal-detail { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 25vh; overflow-y: auto; }
+
+        body [class].ui-grow { flex-grow: 1; }
+        body [class].ui-tab-warning { color: var(--error-color); margin-right: 5px; }
+        body [class].ui-sidebar-divider { border-top: 1px solid #eee; }
+        body [class].ui-recovery-stack { flex-direction: column; align-items: flex-start; gap: 15px; }
+        body [class].ui-gap-small { gap: 8px; }
+        body [class].ui-column-full { flex-direction: column; width: 100%; }
+        body [class].ui-recovery-heading { font-size: 1.1em; color: #005599; }
+        body [class].ui-recovery-steps { margin-top: 5px; margin-bottom: 15px; }
+        body [class].ui-recovery-action { margin-top: 8px; margin-bottom: 12px; }
+        body [class].ui-list-top { margin-top: 5px; }
+        body [class].ui-recovery-location { margin-top: 5px; margin-bottom: 8px; background-color: #e9ecef; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; user-select: all; word-break: break-all; }
+        body [class].ui-recovery-copy { padding: 2px 8px; font-size: 0.85em; vertical-align: middle; margin-bottom: 8px; }
+        body [class].ui-recovery-open { margin-top: 0px; margin-bottom: 12px; }
+        body [class].ui-raw-error { margin-top: 15px; padding: 10px; background-color: #fff; border: 1px solid #ffcdd2; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #c62828; overflow-x: auto; user-select: text; }
+        body [class].ui-toolbar { justify-content: flex-end; padding: 10px; background-color: #f8f9fa; border-bottom: 1px solid var(--border-color); }
+        body [class].ui-spread { justify-content: space-between; align-items: center; }
+        body [class].ui-console-copy { font-size: 0.75em; font-weight: normal; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+        body [class].ui-settings-actions { flex-direction: column; gap: 10px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); }
+        body [class].ui-unsaved-status { font-weight: bold; color: #856404; align-items: center; gap: 5px; }
+        body [class].ui-saved-status { font-weight: bold; color: #4CAF50; align-items: center; gap: 5px; }
+        body [class].ui-apply-button { background-color: #3b82f6; color: white; border: none; border-radius: 4px; transition: opacity 0.3s; align-items: center; justify-content: center; gap: 8px; }
+        body [class].ui-discard-button { background-color: transparent; color: #475569; border: 1px solid #cbd5e1; border-radius: 4px; transition: opacity 0.3s; align-items: center; justify-content: center; gap: 8px; }
+        body [class].ui-progress-heading { margin-bottom: 8px; font-weight: bold; color: var(--hint-color); }
+        body [class].ui-progress { width: 100%; height: 20px; }
+        body [class].ui-top-small { margin-top: 8px; }
+        body [class].ui-top { margin-top: 10px; }
+        body [class].ui-start-button { background-color: #005599; color: white; border: none; border-radius: 4px; align-items: center; justify-content: center; gap: 8px; }
+        body [class].ui-stop-button { border-radius: 4px; align-items: center; justify-content: center; gap: 8px; }
+        body [class].ui-fade { transition: opacity 0.3s; }
+        body [class].ui-width-small { max-width: 250px; }
+        body [class].ui-prompt-mode { max-width: 300px; margin-bottom: 10px; }
+        body [class].ui-row-top { max-width: none; align-items: flex-start; }
+        body [class].ui-prompt-text { flex-grow: 1; height: 80px; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-family: inherit; margin: 0; }
+        body [class].ui-row-file { margin-bottom: 10px; max-width: none; }
+        body [class].ui-browse-file { padding: 4px 10px; white-space: nowrap; cursor: pointer; border: 1px solid var(--border-color); background: white; border-radius: 4px; }
+        body [class].ui-bottom-tight { margin-bottom: 6px; }
+        body [class].ui-preview { background: #F8F9FA; color: #005599; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85em; overflow-y: auto; max-height: 100px; margin: 0; }
+        body [class].ui-width-medium { max-width: 300px; }
+        body [class].ui-bottom { margin-bottom: 10px; }
+        body [class].ui-top-none { margin-top: 0; }
+        body [class].ui-width-full { max-width: none; }
+        body [class].ui-section-small { font-size: 1em; }
+        body [class].ui-width-auto { width: auto; }
+        body [class].ui-check { width: auto; max-width: none; margin: 0; }
+        body [class].ui-check-label { margin: 0; padding-right: 10px; }
+        body [class].ui-check-error { margin-top: -15px; margin-bottom: 15px; }
+        body [class].ui-checkbox-plain { width: auto; margin: 0; }
+        body [class].ui-label-spaced { margin: 0; padding-right: 15px; }
+        body [class].ui-preamble { border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
+        body [class].ui-strong { font-weight: bold; }
+        body [class].ui-inline-hint { color: var(--hint-color); margin-left: 10px; }
+        body [class].ui-export-column { max-width: 600px; padding-top: 0px; }
+        body [class].ui-export-stack { flex-direction: column; gap: 16px; align-items: flex-start; }
+        body [class].ui-export-button { padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px; }
+        body [class].ui-result { max-width: 100%; overflow-wrap: anywhere; }
+        body [class].ui-recovery-actions { gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+        body [class].ui-disclosure { cursor: pointer; }
+        body [class].ui-file-list { margin: 6px 0; padding-left: 20px; }
+        body [class].ui-location { background-color: #e9ecef; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; user-select: all; word-break: break-all; }
+        body [class].ui-copy-button { padding: 2px 8px; font-size: 0.85em; vertical-align: middle; }
+        body [class].ui-destructive-button { padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid red; color: red; border-radius: 4px; }
+        body [class].ui-provider-bottom { padding-bottom: 20px; }
+        body [class].ui-browse-folder { padding: 0 15px; cursor: pointer; border: 1px solid var(--border-color); background: white; border-radius: 4px; height: 34px; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+        body [class].ui-input-auto { width: auto; max-width: none; }
+        body [class].ui-bottom-wide { margin-bottom: 20px; }
+        body [class].ui-align-top { align-items: flex-start; }
+        body [class].ui-checkbox-list { flex-direction: column; gap: 5px; height: 145px; overflow-y: auto; border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; width: 100%; background: white; }
+        body [class].ui-checkbox-row { align-items: center; gap: 8px; font-weight: normal; margin: 0; cursor: pointer; }
+        body [class].ui-control-caption { font-weight: bold; color: var(--hint-color); padding-right: 5px; }
+        [data-provider-inspection] { pointer-events: auto; }
+        .ai-dormant { opacity: 0.6; pointer-events: none; filter: grayscale(100%); }
+        .clipboard-helper { position: fixed; opacity: 0; }
+        .notice-warning { color: #f57f17; background-color: #fff8e1; }
+        .notice-success { color: #2e7d32; }
+        #modal-detail-copy { padding: 2px 8px; font-size: 0.85em; margin: 8px 0; }
     </style>
 </head>
 <body>
@@ -347,7 +440,11 @@
         window.SERVER_LANGUAGE = {{ current_settings.get('GUI_LANGUAGE', 'en') | tojson }};
 
         window.rawOriginalState = {{ current_settings | tojson }};
+        window.SETTINGS_EPOCH = {{ settings_epoch | tojson }};
+        window.SETTINGS_REVISION = {{ settings_revision | tojson }};
+        window.FORM_REPAIR_FIELDS = {{ repair_fields | tojson }};
         window.FIELD_META = {{ field_meta | tojson }};
+        window.MESSAGE_REFERENCES = {{ message_references | tojson }};
         window.PROVIDER_FIELD_KINDS = {{ provider_field_kinds | tojson }};
 
         window.API_TOKEN = null;
@@ -355,6 +452,7 @@
             window.__receiveApiToken = function (token) {
                 window.API_TOKEN = token;
                 resolve(token);
+                if (window.clearNotice) window.clearNotice('connection');
                 return true;
             };
         });
@@ -372,13 +470,8 @@
         setTimeout(function () {
             if (window.API_TOKEN === null) {
                 console.error("Seva's Media Processor: the API token never reached this window.");
-                if (window.showToast) {
-                    window.showToast(
-                        window.getT
-                            ? window.getT('msg_token_handoff_failed', "The application window did not finish starting. Please restart Seva's Media Processor.")
-                            : "The application window did not finish starting. Please restart Seva's Media Processor.",
-                        true
-                    );
+                if (window.notice) {
+                    window.notice({id: 'connection', key: 'msg_token_handoff_failed', summaryKey: 'notice_action_failed'});
                 }
             }
         }, 10000);
@@ -388,34 +481,34 @@
     </script>
 
     <div class="sidebar">
-        <div style="flex-grow: 1;">
+        <div class="ui-grow">
             <a href="javascript:void(0)" onclick="window.switchTab('general')" data-tab="general" class="sidebar-tab {% if active_tab == 'general' %}active{% endif %}">
-                <span id="warn-tab-general" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_general">General</span>
+                <span class="ui-tab-warning" id="warn-tab-general" style="display: none;">⚠️</span><span data-i18n="tab_general">General</span>
             </a>
 
-            <div class="sidebar-group-label" data-i18n="lbl_group_media">Media Files</div>
+            <div class="sidebar-group-label" data-i18n="lbl_group_media">Media Types</div>
 
             <a href="javascript:void(0)" onclick="window.switchTab('images')" data-tab="images" class="sidebar-tab sidebar-subtab {% if active_tab == 'images' %}active{% endif %}">
-                <span id="warn-tab-images" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_images">Images</span>
+                <span class="ui-tab-warning" id="warn-tab-images" style="display: none;">⚠️</span><span data-i18n="tab_images">Images</span>
             </a>
             <a href="javascript:void(0)" onclick="window.switchTab('docs')" data-tab="docs" class="sidebar-tab sidebar-subtab {% if active_tab == 'docs' %}active{% endif %}">
-                <span id="warn-tab-docs" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_docs">Documents (PDF)</span>
+                <span class="ui-tab-warning" id="warn-tab-docs" style="display: none;">⚠️</span><span data-i18n="tab_docs">Documents (PDF)</span>
             </a>
             <a href="javascript:void(0)" onclick="window.switchTab('animations')" data-tab="animations" class="sidebar-tab sidebar-subtab {% if active_tab == 'animations' %}active{% endif %}">
-                <span id="warn-tab-animations" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_animations">Animations (GIF)</span>
+                <span class="ui-tab-warning" id="warn-tab-animations" style="display: none;">⚠️</span><span data-i18n="tab_animations">Animations (GIF)</span>
             </a>
             <a href="javascript:void(0)" onclick="window.switchTab('videos')" data-tab="videos" class="sidebar-tab sidebar-subtab {% if active_tab == 'videos' %}active{% endif %}">
-                <span id="warn-tab-videos" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_videos">Videos</span>
+                <span class="ui-tab-warning" id="warn-tab-videos" style="display: none;">⚠️</span><span data-i18n="tab_videos">Videos</span>
             </a>
 
-            <a href="javascript:void(0)" onclick="window.switchTab('output')" data-tab="output" class="sidebar-tab {% if active_tab == 'output' %}active{% endif %}" style="border-top: 1px solid #eee;">
-                <span id="warn-tab-output" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_output">Output Quality</span>
+            <a href="javascript:void(0)" onclick="window.switchTab('output')" data-tab="output" class="sidebar-tab {% if active_tab == 'output' %}active{% endif %} ui-sidebar-divider">
+                <span class="ui-tab-warning" id="warn-tab-output" style="display: none;">⚠️</span><span data-i18n="tab_output">Output</span>
             </a>
             <a href="javascript:void(0)" onclick="window.switchTab('ai')" data-tab="ai" class="sidebar-tab {% if active_tab == 'ai' %}active{% endif %}">
-                <span id="warn-tab-ai" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_ai">Process images with AI</span>
+                <span class="ui-tab-warning" id="warn-tab-ai" style="display: none;">⚠️</span><span data-i18n="tab_ai">Process images with AI</span>
             </a>
             <a href="javascript:void(0)" onclick="window.switchTab('exports')" data-tab="exports" class="sidebar-tab {% if active_tab == 'exports' %}active{% endif %}">
-                <span id="warn-tab-exports" style="display:none; color:var(--error-color); margin-right:5px;">⚠️</span><span data-i18n="tab_exports">Exports</span>
+                <span class="ui-tab-warning" id="warn-tab-exports" style="display: none;">⚠️</span><span data-i18n="tab_exports">Exports</span>
             </a>
         </div>
 
@@ -433,14 +526,17 @@
 
     <div class="main-wrapper" id="main-wrapper">
         <div id="global-error-banner" class="alert-banner global-alert">
-            <div class="banner-row">
+            <div class="banner-row" id="field-error-summary">
                 <span>⚠️</span> <span id="global-error-text"></span>
             </div>
 
             <div class="banner-row" id="global-error-ai-hint" style="display: none;">
-                <span data-i18n="msg_ai_optional_hint">Don't need AI? Select "Turn media files to JPEGs".</span>
-                <button type="button" class="banner-jump-btn" onclick="window.goToField('general', 'ENABLE_LLM_INFERENCE')"><span data-i18n="btn_goto_mode">Go to setting</span></button>
+                <span data-i18n="msg_ai_optional_hint" data-i18n-refs='{"setting": "ENABLE_LLM_INFERENCE"}'>AI is optional. Change {setting}.</span>
             </div>
+    <div id="ai-disabled-warning" class="banner-row notice-warning" style="display:none;">
+        <span data-i18n="warn_ai_disabled_lbl" data-i18n-refs='{"setting": "ENABLE_LLM_INFERENCE"}'>AI is off. Change {setting} to enable it.</span>
+    </div>
+            <div id="persistent-notices" aria-live="polite"></div>
         </div>
 
         <div class="tab-main-header" id="tab-main-header">
@@ -448,58 +544,58 @@
         </div>
 
         <div id="main-scroll">
-        <div id="general-fatal-error" class="alert-banner global-alert" style="flex-direction: column; align-items: flex-start; gap: 15px;">
-            <div style="display: flex; gap: 8px;">
+        <div id="general-fatal-error" class="alert-banner global-alert ui-recovery-stack">
+            <div class="ui-gap-small" style="display: flex;">
                 <span>⚠️</span> <span id="general-fatal-text"></span>
             </div>
-            <div id="fatal-corrupted-instructions" style="display: none; flex-direction: column; width: 100%;">
+            <div class="ui-column-full" id="fatal-corrupted-instructions" style="display: none;">
                 <div data-i18n="msg_corrupted_title">Settings file is corrupted! You have two options:</div>
                 <br>
-                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_corrupted_opt1_title">Option 1: Reset everything to defaults</b>
-                <ol style="margin-top:5px; margin-bottom:15px;">
+                <b class="ui-recovery-heading" data-i18n="msg_corrupted_opt1_title">Option 1: Reset everything to defaults</b>
+                <ol class="ui-recovery-steps">
                     <li>
                         <span data-i18n="msg_corrupted_opt1_step1">This will deactivate your settings and rename the file to a corrupted backup.</span><br>
-                        <button class="btn-default" onclick="resetSettings()" style="margin-top:8px; margin-bottom:12px;"><span data-i18n="btn_reset_defaults">Reset to Defaults</span></button>
+                        <button class="btn-default ui-recovery-action" onclick="resetSettings()"><span data-i18n="btn_reset_defaults">Reset to Defaults</span></button>
                     </li>
                 </ol>
-                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_corrupted_opt2_title">Option 2: Fix it manually</b>
-                <ol style="margin-top:5px;">
+                <b class="ui-recovery-heading" data-i18n="msg_corrupted_opt2_title">Option 2: Fix it manually</b>
+                <ol class="ui-list-top">
                     <li>
                         <span data-i18n="msg_corrupted_opt2_step1">The settings can be located here in the settings.json:</span><br>
-                        <code id="corrupted-settings-path" style="display:inline-block; margin-top:5px; margin-bottom:8px; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;">{{ settings_path }}</code>
-                        <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle; margin-bottom:8px;" onclick='copyTextToClipboard(document.getElementById("corrupted-settings-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
-                        <button class="btn-default" onclick="openSettingsFile('active')" style="margin-top:0px; margin-bottom:12px;"><span data-i18n="btn_open_corrupted">Open settings.json</span></button>
+                        <code class="ui-recovery-location" id="corrupted-settings-path" style="display: inline-block;">{{ settings_path }}</code>
+                        <button type="button" class="btn-default ui-recovery-copy" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("corrupted-settings-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
+                        <button class="btn-default ui-recovery-open" onclick="openSettingsFile('active')"><span data-i18n="btn_open_corrupted">Open settings.json</span></button>
                     </li>
-                    <li data-i18n="msg_corrupted_opt2_step2">Find and fix the syntax error (e.g. missing quotes or commas) and click 'File > Save'.</li>
+                    <li data-i18n="msg_corrupted_opt2_step2">Find and fix the syntax error (e.g., missing quotes or commas) and click 'File > Save'.</li>
                     <li data-i18n="msg_corrupted_opt2_step3">Restart the application.</li>
                 </ol>
-                <div id="raw-error-container" style="margin-top: 15px; padding: 10px; background-color: #fff; border: 1px solid #ffcdd2; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #c62828; overflow-x: auto; user-select: text;">
+                <div class="ui-raw-error" id="raw-error-container">
                 </div>
             </div>
 
-            <div id="fatal-reset-instructions" style="display: none; flex-direction: column; width: 100%;">
+            <div class="ui-column-full" id="fatal-reset-instructions" style="display: none;">
                 <div data-i18n="msg_reset_success">Settings have been reset to default values! You now have two options:</div>
                 <br>
-                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_reset_opt1_title">Option 1: If you don't care about your old settings</b>
-                <ol style="margin-top:5px; margin-bottom:15px;">
+                <b class="ui-recovery-heading" data-i18n="msg_reset_opt1_title">Option 1: If you don't care about your old settings</b>
+                <ol class="ui-recovery-steps">
                     <li data-i18n="msg_reset_opt1_step1">Simply close the application.</li>
                     <li data-i18n="msg_reset_opt1_step2">Restart the application.</li>
                 </ol>
-                <b style="font-size:1.1em; color:#005599;" data-i18n="msg_reset_opt2_title">Option 2: If you want to recover your folder paths or other options</b>
-                <ol style="margin-top:5px;">
+                <b class="ui-recovery-heading" data-i18n="msg_reset_opt2_title">Option 2: If you want to recover your folder paths or other options</b>
+                <ol class="ui-list-top">
                     <li>
                         <span data-i18n="msg_reset_opt2_step1">Your old corrupted settings can be found in the backup file:</span><br>
-                        <code id="backup-path-display" style="display:inline-block; margin-top:5px; margin-bottom:8px; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;"></code>
-                        <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle; margin-bottom:8px;" onclick='copyTextToClipboard(document.getElementById("backup-path-display").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
-                        <button class="btn-default" onclick="openSettingsFile('backup')" style="margin-top:0px; margin-bottom:12px;"><span data-i18n="btn_open_backup">Open latest backup (.json)</span></button>
+                        <code class="ui-recovery-location" id="backup-path-display" style="display: inline-block;"></code>
+                        <button type="button" class="btn-default ui-recovery-copy" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("backup-path-display").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
+                        <button class="btn-default ui-recovery-open" onclick="openSettingsFile('backup')"><span data-i18n="btn_open_backup">Open backup file</span></button>
                     </li>
                     <li>
                         <span data-i18n="msg_reset_opt2_step2">Open the new clean settings file:</span><br>
-                        <code id="reset-settings-path" style="display:inline-block; margin-top:5px; margin-bottom:8px; background-color:#e9ecef; padding:2px 4px; border-radius:3px; font-size:0.9em; user-select:all; word-break: break-all;">{{ settings_path }}</code>
-                        <button type="button" class="btn-default" style="display:inline-flex; padding:2px 8px; font-size:0.85em; vertical-align:middle; margin-bottom:8px;" onclick='copyTextToClipboard(document.getElementById("reset-settings-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
-                        <button class="btn-default" onclick="openSettingsFile('active')" style="margin-top:0px; margin-bottom:12px;"><span data-i18n="btn_open_new_settings">Open new settings.json</span></button>
+                        <code class="ui-recovery-location" id="reset-settings-path" style="display: inline-block;">{{ settings_path }}</code>
+                        <button type="button" class="btn-default ui-recovery-copy" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("reset-settings-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button><br>
+                        <button class="btn-default ui-recovery-open" onclick="openSettingsFile('active')"><span data-i18n="btn_open_new_settings">Open new settings.json</span></button>
                     </li>
-                    <li data-i18n="msg_reset_opt2_step3">Copy your old settings over and click 'File &gt; Save' in your text editor.</li>
+                    <li data-i18n="msg_reset_opt2_step3">Carefully copy only the specific values you want to keep (like your folder paths) over to the new file and click 'File &gt; Save'.</li>
                     <li data-i18n="msg_reset_opt2_step4">Close and restart the application.</li>
                 </ol>
             </div>
@@ -514,12 +610,12 @@
     <div class="resizer" id="drag-resizer"></div>
 
     <div class="console-container" id="console-container">
-        <div style="display: flex; justify-content: flex-end; padding: 10px; background-color: #f8f9fa; border-bottom: 1px solid var(--border-color);">
+        <div class="ui-toolbar" style="display: flex;">
         </div>
-        <div class="console-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span data-i18n="lbl_console">Live Processing Console</span>
-            <button type="button" id="btn-copy-console" onclick="copyConsoleToClipboard()"
-                    style="font-size: 0.75em; font-weight: normal; padding: 4px 10px; border-radius: 4px; cursor: pointer;"
+        <div class="console-header ui-spread" style="display: flex;">
+            <span data-i18n="lbl_console">Console</span>
+            <button class="ui-console-copy" type="button" id="btn-copy-console" onclick="copyConsoleToClipboard()"
+
                     title="Copy the full console text to the clipboard">
                 📋 <span data-i18n="btn_copy_console">Copy</span>
             </button>
@@ -527,47 +623,44 @@
         <div class="console-output" id="console-output"></div>
 
         <div class="footer-controls">
-            <div id="global-actions" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color);">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div id="unsaved-warning-label" style="font-weight: bold; color: #856404; display: none; align-items: center; gap: 5px;">
+            <div class="ui-settings-actions" id="global-actions" style="display: flex;">
+                <div class="ui-spread" style="display: flex;">
+                    <div class="ui-unsaved-status" id="unsaved-warning-label" style="display: none;">
                         ⚠️ <span data-i18n="lbl_unsaved">Unsaved Changes</span>
                     </div>
-                    <div id="saved-status-label" style="font-weight: bold; color: #4CAF50; display: flex; align-items: center; gap: 5px;">
+                    <div class="ui-saved-status" id="saved-status-label" style="display: flex;">
                         ✔ <span data-i18n="lbl_saved">Configuration Up to Date</span>
                     </div>
                 </div>
                 <div class="controls-row">
-                    <button id="btn-apply" onclick="window.commitGlobalDraft()" style="background-color: #3b82f6; color: white; border: none; border-radius: 4px; transition: opacity 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <button class="ui-apply-button" id="btn-apply" onclick="window.commitGlobalDraft()" style="display: flex;">
                         ✔ <span data-i18n="btn_apply_changes">Apply Changes</span>
                     </button>
-                    <button id="btn-discard" onclick="window.discardGlobalDraft()" style="background-color: transparent; color: #475569; border: 1px solid #cbd5e1; border-radius: 4px; transition: opacity 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <button class="ui-discard-button" id="btn-discard" onclick="window.discardGlobalDraft()" style="display: flex;">
                         ✘ <span data-i18n="btn_discard">Discard</span>
                     </button>
                 </div>
             </div>
 
-            <div style="margin-bottom: 8px; font-weight: bold; color: var(--hint-color);">
-                <span data-i18n="lbl_progress_title">Processing Progress</span>
+            <div class="ui-progress-heading">
+                <span data-i18n="lbl_progress_title">Processing progress</span>
             </div>
-            <progress id="progress-bar" value="0" max="100" style="width: 100%; height: 20px;"></progress>
+            <progress class="ui-progress" id="progress-bar" value="0" max="100"></progress>
             <div id="run-status"></div>
-            <div class="controls-row" style="margin-top: 10px;">
-                <button id="btn-start" onclick="startProcessing()" style="background-color: #005599; color: white; border: none; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 8px;">▶️ <span data-i18n="btn_start">Start processing</span></button>
-                <button id="btn-stop" onclick="stopProcessing()" data-stopping="false" disabled style="border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 8px;"><span id="btn-stop-icon">🛑</span> <span id="btn-stop-text" data-i18n="btn_stop">Stop</span></button>
+            <div class="ui-top-small" id="export-run-notice" style="display: none;">
+                <button type="button" class="btn-default" onclick="window.switchTab('exports')" data-i18n="btn_review_export">Review report saving</button>
+            </div>
+            <div class="controls-row ui-top">
+                <button class="ui-start-button" id="btn-start" onclick="startProcessing()" style="display: flex;">▶️ <span data-i18n="btn_start">Start processing</span></button>
+                <button class="ui-stop-button" id="btn-stop" onclick="stopProcessing()" data-stopping="false" disabled style="display: flex;"><span id="btn-stop-icon">🛑</span> <span id="btn-stop-text" data-i18n="btn_stop">Stop</span></button>
             </div>
         </div>
     </div>
 
-    <div id="save-toast">
-        ✓ <span data-i18n="toast_saved">Settings Saved</span>
-    </div>
-
-    <div id="error-toast">
-        ✘ <span data-i18n="toast_not_saved">Settings not saved due to errors.</span>
-    </div>
+    <div id="generic-toast" role="status" data-notice-component="toast"></div>
 
     <div id="about-overlay">
-        <div id="about-dialog" role="dialog" aria-modal="true">
+        <div id="about-dialog" role="dialog" aria-modal="true" aria-label="About">
             <div id="about-head">
                 <img src="{{ url_for('static', filename='app_icon_64.png') }}" width="48" height="48" alt="">
                 <div>
@@ -600,11 +693,15 @@
     </div>
 
     <div id="modal-overlay">
-        <div id="modal-dialog" role="dialog" aria-modal="true">
-            <div id="modal-message"></div>
+        <div id="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-message">
+            <div id="modal-message" data-notice-component="dialog"></div>
+            <div id="modal-detail" class="hint" hidden></div>
+            <button id="modal-detail-copy" class="btn-default" type="button" hidden onclick="copyTextToClipboard(document.getElementById('modal-detail').textContent, this)"><span data-i18n="btn_copy_console">Copy</span></button>
             <code id="modal-path"></code>
             <button type="button" class="btn-default" id="modal-path-copy"
                     onclick='copyTextToClipboard(document.getElementById("modal-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+
+            <div id="modal-jump"></div>
             <div id="modal-buttons">
                 <button type="button" id="modal-cancel">Cancel</button>
                 <button type="button" id="modal-ok">OK</button>

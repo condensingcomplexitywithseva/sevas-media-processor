@@ -10,13 +10,26 @@ from ..content import ContentPolicy, estimate_tokens
 from . import _openai_compat as oai
 
 _CHAT_MODELS = {
-    "deepseek-chat",
-    "deepseek-reasoner",
+    "deepseek-v4-flash-vision-exp",
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "deepseek-chat",
+    "deepseek-reasoner",
 }
 
 _SYSTEM_FINGERPRINT = "fp_deepseek_v4"
+
+_VISION_MODEL = "deepseek-v4-flash-vision-exp"
+
+
+def _carries_image(messages: list) -> bool:
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list) and any(
+                isinstance(part, dict) and part.get("type") == "image_url"
+                for part in content):
+            return True
+    return False
 
 
 class DeepSeekServer(ProviderServer):
@@ -102,6 +115,11 @@ class DeepSeekServer(ProviderServer):
                     "Please remove it before sending the request.",
                     code="invalid_request_error"), status=400)
 
+        if model != _VISION_MODEL and _carries_image(messages):
+            return self.json_response(oai.oai_error(
+                "This model does not support image",
+                code="invalid_request_error"), status=400)
+
         thinking = self._is_thinking(model, body)
 
         text = self.content.answer(body)
@@ -172,6 +190,7 @@ class DeepSeekServer(ProviderServer):
             return auth
         data = [
             {"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek"},
+            {"id": "deepseek-v4-flash-vision-exp", "object": "model", "owned_by": "deepseek"},
             {"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"},
         ]
         return self.json_response({"object": "list", "data": data})

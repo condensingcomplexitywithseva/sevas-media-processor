@@ -31,7 +31,7 @@ class GenericServer(ProviderServer):
 
     def __init__(self, default_behavior=None):
         self.default_behavior = default_behavior or {
-            "json": openai_reply("default fake answer")}
+            "json": openai_reply('{"answer": "default fake answer"}')}
         super().__init__()
 
     def register_routes(self, app: Flask) -> None:

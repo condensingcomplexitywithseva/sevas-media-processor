@@ -1,14 +1,37 @@
 # Copyright 2026 Vsevolod Belonogov
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 import sys
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[2] / "src"
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from version import APP_LINKS, APP_VERSION
+
+LOCALES = sorted(p.stem for p in (SRC / "locales").glob("*.json"))
+README_VERSION_LINE = re.compile(r"^Current version: (\S+)\s*$", re.M)
+
+
+@pytest.mark.parametrize("locale", LOCALES)
+def test_the_sidebar_shows_the_readme_version_token_in_every_locale(open_page, locale):
+    assert LOCALES, "no locale files found"
+    readme_token = README_VERSION_LINE.search((REPO_ROOT / "README.md").read_text(encoding="utf-8"))
+    assert readme_token is not None
+    page = open_page({})
+    page.evaluate(f"changeLanguage('{locale}')")
+    page.wait_for_timeout(400)
+    sidebar = page.locator("#sidebar-brand").inner_text()
+    assert readme_token.group(1) in sidebar, (locale, sidebar)
+    assert readme_token.group(1) == f"v{APP_VERSION}"
+    page.click("#sidebar-brand")
+    page.wait_for_timeout(200)
+    assert readme_token.group(1) in page.locator("#about-version").inner_text()
 
 
 def test_sidebar_brand_shows_name_and_version_on_every_tab(open_page):

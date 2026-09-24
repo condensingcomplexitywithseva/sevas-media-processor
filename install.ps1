@@ -7,11 +7,19 @@ $RequiredMajor = 3
 $RequiredMinor = 14
 $UseStrictRequirements = $true
 
+function Stop-OnFailure {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: $Step (exit code $LASTEXITCODE). The steps after this one were not run." -ForegroundColor Red
+        Read-Host "Press Enter to close this window"
+        exit 1
+    }
+}
+
 Write-Host "1/5 Verifying Global Python Installation..."
 try {
     $pythonPath = (Get-Command python.exe -ErrorAction Stop).Source
     $versionString = & $pythonPath --version 2>&1
-    # Extracts the version numbers (e.g., "Python 3.14.3" -> 3, 14, 3)
     $versionParts = ($versionString -replace '[^\d.]', '').Split('.')
     $major = [int]$versionParts[0]
     $minor = [int]$versionParts[1]
@@ -32,7 +40,7 @@ try {
                 $UseStrictRequirements = $false
             } else {
                 Write-Host "Setup cancelled. Cannot proceed without a compatible Python version." -ForegroundColor Red
-                exit
+                exit 1
             }
         }
     } elseif ($major -gt $RequiredMajor -or $minor -gt $RequiredMinor) {
@@ -45,7 +53,7 @@ try {
             $UseStrictRequirements = $false
         } else {
             Write-Host "Setup cancelled. This version of the application is tested with Python $RequiredMajor.$RequiredMinor." -ForegroundColor Red
-            exit
+            exit 1
         }
     } else {
         Write-Host "Found Python $versionString. (Requirements met)." -ForegroundColor Green
@@ -56,7 +64,13 @@ try {
     } else {
         Write-Host "Python not found. Attempting to install via winget..." -ForegroundColor Yellow
     }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "winget is not available on this computer. Install Python 3.14 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' during the installation), then run this script again." -ForegroundColor Red
+        Read-Host "Press Enter to close this window"
+        exit 1
+    }
     winget install --id Python.Python.3.14 --silent --accept-source-agreements --accept-package-agreements
+    Stop-OnFailure "installing Python with winget"
 
     Write-Host "Please restart this terminal window to complete the Python path registration." -ForegroundColor Cyan
     Read-Host "Press Enter to exit and then re-open this folder..."
@@ -64,8 +78,9 @@ try {
 }
 
 Write-Host "2/5 Creating/Verifying isolated Virtual Environment..."
-if (!(Test-Path "$InstallDir\venv")) {
+if (!(Test-Path -LiteralPath "$InstallDir\venv")) {
     & $pythonPath -m venv "$InstallDir\venv"
+    Stop-OnFailure "creating the virtual environment"
     Write-Host "Virtual environment created." -ForegroundColor Green
 } else {
     Write-Host "Virtual environment already exists. Skipping creation." -ForegroundColor Cyan
@@ -76,30 +91,32 @@ $venvPythonw = "$InstallDir\venv\Scripts\pythonw.exe"
 
 Write-Host "3/5 Installing media libraries into the virtual environment (This takes a moment)..."
 & $venvPython -m pip install --upgrade pip | Out-Null
+Stop-OnFailure "upgrading pip"
 
 if ($UseStrictRequirements) {
-    # Every package pinned, so this install matches the tested one exactly
     & $venvPython -m pip install -r "$InstallDir\requirements.lock"
+    Stop-OnFailure "installing the libraries"
 } else {
-    # Unpinned, and direct dependencies only, for older or newer Python versions
     & $venvPython -m pip install -r "$InstallDir\requirements_no_version.txt"
+    Stop-OnFailure "installing the libraries"
 }
 
 Write-Host "4/5 Preparing first-run files..."
 foreach ($dir in @("input", "output")) {
-    if (!(Test-Path "$InstallDir\$dir")) {
-        New-Item -ItemType Directory -Path "$InstallDir\$dir" | Out-Null
+    if (!(Test-Path -LiteralPath "$InstallDir\$dir")) {
+        [System.IO.Directory]::CreateDirectory("$InstallDir\$dir") | Out-Null
         Write-Host "Created empty '$dir' folder." -ForegroundColor Green
     }
 }
-if (!(Test-Path "$InstallDir\settings.json")) {
-    Copy-Item "$InstallDir\settings.example.json" "$InstallDir\settings.json"
+if (!(Test-Path -LiteralPath "$InstallDir\settings.json")) {
+    [System.IO.File]::Copy("$InstallDir\settings.example.json", "$InstallDir\settings.json")
     Write-Host "Created settings.json from the settings.example.json template." -ForegroundColor Green
 }
 
 Write-Host "5/5 Creating your Desktop Shortcut..."
+$DesktopDir = [Environment]::GetFolderPath('Desktop')
 $WshShell = New-Object -comObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$Home\Desktop\Seva's Media Processor.lnk")
+$Shortcut = $WshShell.CreateShortcut("$DesktopDir\Seva's Media Processor.lnk")
 $Shortcut.TargetPath = $venvPythonw
 $Shortcut.Arguments = ".\src\main.py"
 $Shortcut.WorkingDirectory = $InstallDir

@@ -133,6 +133,9 @@ _ALLOWED_PLAIN = {
     "routes\\about_api.py": {
         'webbrowser.open(url)',
     },
+    "db_controller.py": {
+        'with self.sql_engine.connect() as connection:',
+    },
     "to_jpeg_converter.py": {
         'current.save( buffer, "JPEG", quality=mid, subsampling=0 )',
         'current.save( buffer, "JPEG", quality=self.lowest_quality_limit, subsampling=0 )',
@@ -251,16 +254,14 @@ def test_the_run_database_opens_past_260_chars(tmp_path):
     try:
         assert controller.get_highest_file_id() == 0
     finally:
+        controller.record_run_configuration(False, "", ())
         controller.close()
     assert Path(get_safe_path(database_path)).exists()
 
     exporter = SQLiteDataExporter(database_path)
-    try:
-        exporter.export_csv(deep / "exports", timestamp="pinned")
-    finally:
-        exporter.close()
+    exporter.export_csv(deep / "exports", timestamp="pinned")
     exports = list(Path(get_safe_path(deep / "exports")).glob("*.csv"))
-    assert len(exports) == 2, "both CSV reports must land next to the deep database"
+    assert len(exports) == 3, "all CSV reports must land next to the deep database"
 
 
 @on_windows
@@ -283,10 +284,10 @@ def test_both_database_engines_hand_sqlite_the_safe_spelling(tmp_path, monkeypat
 
     database_path = tmp_path / "application_state.db"
     controller = SQLiteDatabaseController(database_path)
+    controller.record_run_configuration(False, "", ())
     controller.close()
     exporter = SQLiteDataExporter(database_path)
     exporter.export_csv(tmp_path / "exports", timestamp="pinned")
-    exporter.close()
 
     assert captured, "no connection was made - the capture went blind"
     plain = [c for c in captured if not c.startswith("\\\\?\\")]

@@ -15,12 +15,16 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from fs_utils import (
+    SOURCE_HASH_CHUNK_BYTES,
     format_hms,
     format_hms_for_filename,
     get_safe_path,
     read_prompt,
+    replace_lone_surrogates,
     sanitize_filename_prefix,
     humanize_paths,
+    source_sha256,
+    source_state,
 )
 
 windows_only = pytest.mark.skipif(os.name != "nt", reason="Windows long-path prefixing")
@@ -304,24 +308,24 @@ def test_the_two_helpers_can_never_drift():
 
 
 def test_plan_examples_render_as_specified():
-    assert sanitize_filename_prefix("IMG_0141", 20) == "IMG_0141"
+    assert sanitize_filename_prefix("IMG_1234", 20) == "IMG_1234"
     assert (
-        sanitize_filename_prefix("fed monetary policy report charts", 20)
-        == "fed monetary policy"
+        sanitize_filename_prefix("city parks planning report 2019", 20)
+        == "city parks planning"
     )
     assert (
-        sanitize_filename_prefix("How To Mod Stronghold 4 Graphics & Style", 20)
-        == "How To Mod Stronghol"
+        sanitize_filename_prefix("How To Paint 4 Castle Walls & Gates", 20)
+        == "How To Paint 4 Castl"
     )
-    assert sanitize_filename_prefix("день рождения 🎂🎈", 20) == "день рождения 🎂🎈"
+    assert sanitize_filename_prefix("праздник у моря 🎂🎈", 20) == "праздник у моря 🎂🎈"
 
 
 def test_spaces_and_international_characters_survive_verbatim():
     for stem in (
-        "фото (копия) №2",
-        "صورة العائلة القديمة",
-        "全家福 2026年春节",
-        "试试 café ñandú → фото Ω",
+        "снимок (копия) №3",
+        "رحلة إلى البحر",
+        "旅行照片 2025年夏天",
+        "测试 crème ñu → снимок Ω",
     ):
         assert sanitize_filename_prefix(stem, 64) == stem
 
@@ -369,12 +373,12 @@ def test_all_illegal_names_come_back_empty_for_the_legacy_fallback(hopeless):
 
 
 def test_length_zero_means_no_prefix():
-    assert sanitize_filename_prefix("IMG_0141", 0) == ""
+    assert sanitize_filename_prefix("IMG_1234", 0) == ""
 
 
 def test_negative_length_is_a_programmer_error():
     with pytest.raises(ValueError):
-        sanitize_filename_prefix("IMG_0141", -1)
+        sanitize_filename_prefix("IMG_1234", -1)
 
 
 def test_lone_surrogates_die_here_not_in_the_export():
@@ -387,3 +391,65 @@ def test_lone_surrogates_die_here_not_in_the_export():
     buffer = io.StringIO()
     csv.writer(buffer).writerow([cleaned])
     buffer.getvalue().encode("utf-8")
+
+
+
+def test_replace_lone_surrogates_makes_the_string_utf8_encodable():
+    hostile = "bad\ud800middle\udfffend"
+    cleaned = replace_lone_surrogates(hostile)
+    assert cleaned == "bad\ufffdmiddle\ufffdend"
+    cleaned.encode("utf-8")
+
+
+@pytest.mark.parametrize("clean", ["plain", "юникод 🎂", "", "tab\tand\nnewline"])
+def test_replace_lone_surrogates_leaves_clean_text_untouched(clean):
+    assert replace_lone_surrogates(clean) == clean
+
+
+def test_replace_lone_surrogates_keeps_real_emoji():
+    assert replace_lone_surrogates("answer 🎈 done") == "answer 🎈 done"
+
+
+
+def test_source_state_is_size_and_nanosecond_modification_time(tmp_path):
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"12345")
+    os.utime(source, ns=(1_700_000_000_123_456_700, 1_700_000_000_123_456_700))
+    assert source_state(source) == (5, 1_700_000_000_123_456_700)
+    assert source_state(tmp_path / "missing.pdf") is None
+
+
+def test_source_sha256_hashes_every_chunk_of_the_file(tmp_path):
+    import hashlib
+    source = tmp_path / "video.mp4"
+    data = os.urandom(2 * SOURCE_HASH_CHUNK_BYTES + 7)
+    source.write_bytes(data)
+    assert source_sha256(source) == hashlib.sha256(data).hexdigest()
+    empty = tmp_path / "empty.png"
+    empty.write_bytes(b"")
+    assert source_sha256(empty) == hashlib.sha256(b"").hexdigest()
+
+
+def test_source_sha256_reports_stop_and_unreadable_files_distinctly(tmp_path):
+    import threading
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"x" * (3 * SOURCE_HASH_CHUNK_BYTES))
+    stop = threading.Event()
+    stop.set()
+    assert source_sha256(source, stop) is None
+    assert source_sha256(tmp_path / "missing.mp4") == ""
+    assert source_sha256(tmp_path) == ""
+
+
+@windows_only
+def test_source_helpers_reach_a_file_beyond_the_legacy_path_limit(tmp_path):
+    deep = tmp_path
+    while len(str(deep)) < 280:
+        deep = deep / ("d" * 40)
+    os.makedirs(get_safe_path(deep))
+    source = deep / "photo.png"
+    with open(get_safe_path(source), "wb") as handle:
+        handle.write(b"deep")
+    state = source_state(source)
+    assert state is not None and state[0] == 4
+    assert source_sha256(source) not in (None, "")

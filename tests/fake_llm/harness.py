@@ -39,6 +39,11 @@ _DEFAULT_SETTINGS = {
     "LLM_SYSTEM_PROMPT_MODE": "TEXT",
     "LLM_USER_PROMPT": "Transcribe all text from these images.",
     "LLM_USER_PROMPT_MODE": "TEXT",
+    "LLM_OUTPUT_MODE": "table_per_file",
+    "LLM_OUTPUT_COLUMNS": "answer",
+    "LLM_OUTPUT_COLUMN_INSTRUCTIONS": "",
+    "LLM_JSON_MAX_ATTEMPTS": 3,
+    "LLM_ABORT_ON_MALFORMED_JSON": False,
 }
 
 class _Auto:
@@ -50,10 +55,12 @@ _AUTO = _Auto()
 
 def build_client(provider_name: str, base_url: str, *,
                  token: str | _Auto | None = _AUTO,
+                 provider_overrides: dict | None = None,
                  **settings_overrides) -> LLMClient:
     preset = _default_provider_configs()[provider_name]
     path = urlparse(preset.url).path or "/"
-    cfg = preset.model_copy(update={"url": base_url.rstrip("/") + path})
+    cfg = preset.model_copy(update={"url": base_url.rstrip("/") + path,
+                                    **(provider_overrides or {})})
 
     settings_kwargs = dict(_DEFAULT_SETTINGS)
     settings_kwargs.update(settings_overrides)
@@ -71,10 +78,12 @@ def build_client(provider_name: str, base_url: str, *,
 def wire_provider():
     started = []
 
-    def _make(provider_name: str, *, token=_AUTO, **settings_overrides):
+    def _make(provider_name: str, *, token=_AUTO, provider_overrides=None,
+              **settings_overrides):
         srv = make_server(provider_name).start()
         started.append(srv)
         client = build_client(provider_name, srv.base_url, token=token,
+                              provider_overrides=provider_overrides,
                               **settings_overrides)
         return srv, client
 

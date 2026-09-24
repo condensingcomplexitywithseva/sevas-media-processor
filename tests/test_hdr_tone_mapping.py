@@ -1,6 +1,7 @@
 # Copyright 2026 Vsevolod Belonogov
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -219,12 +220,19 @@ JPEG_TOLERANCE = 3
     ],
 )
 def test_tagged_hdr_video_frames_are_tone_mapped(
-    tmp_path, color_trc, y_code, expected_level, note
+    tmp_path, caplog, color_trc, y_code, expected_level, note
 ):
+    caplog.set_level(logging.INFO, logger="pipelines.video")
     video = make_tagged_video(tmp_path / "hdr.mp4", color_trc, y_code=y_code)
     results, summary = run_video(video, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    kind = "HLG" if color_trc == 18 else "PQ"
+    detected = [r for r in caplog.records if f"HDR video ({kind}) detected" in r.getMessage()]
+    assert len(detected) == 1, "said once per file, at detection"
+    assert "slower per frame" in detected[0].getMessage()
+    assert "Not a hang" in detected[0].getMessage()
+
+    assert summary.range_status == "ok"
     assert len(results) == 3
     for result in results:
         assert result.success == Status.OK.value
@@ -237,11 +245,13 @@ def test_tagged_hdr_video_frames_are_tone_mapped(
             )
 
 
-def test_untagged_control_stays_naive_and_note_free(tmp_path, monkeypatch):
+def test_untagged_control_stays_naive_and_note_free(tmp_path, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="pipelines.video")
     video = make_tagged_video(tmp_path / "sdr.mp4", None)
 
     results, summary = run_video(video, tmp_path / "out_a")
-    assert summary.final_aggregate_status == Status.OK.value
+    assert summary.range_status == "ok"
+    assert "HDR video" not in caplog.text
     for result in results:
         assert "HDR" not in result.comment
         pixel = center_pixel(tmp_path / "out_a" / result.output_filename)
@@ -270,9 +280,9 @@ def test_guard_trip_falls_back_gracefully_with_visible_warnings(
     monkeypatch.setattr(video_module, "hdr_frame_to_srgb_image", tripped_guard)
     results, summary = run_video(video, tmp_path / "out")
 
-    assert summary.final_aggregate_status == Status.OK.value
+    assert all(r.success == Status.OK.value for r in results)
     assert "HDR tone-mapping fell back to plain decode" in (
-        summary.final_aggregate_comment
+        summary.file_to_jpegs_comment
     )
     assert len(results) == 3
     for result in results:

@@ -39,18 +39,13 @@ class BaseMediaPipeline(ABC):
 
     def create_failure_summary(self, error_message: str) -> FileSummary:
         return FileSummary(
-            total_discovered_pages=0,
-            applied_range_string="",
-            range_status_code=Status.FAILURE.value,
-            final_aggregate_status=Status.FAILURE.value,
-            final_aggregate_comment=error_message
+            total_pages=0,
+            page_range="",
+            range_status=Status.FAILURE.value,
+            file_to_jpegs_comment=error_message
         )
 
-    def abort_pipeline(self, error_message: str, dummy_comment: str | None = None,
-                       ) -> Generator[PageResult, None, FileSummary]:
-        if dummy_comment is None:
-            dummy_comment = error_message
-
+    def abort_pipeline(self, error_message: str, dummy_comment: str) -> Generator[PageResult, None, FileSummary]:
         yield PageResult(page_number=1, output_filename="", success=Status.FAILURE.value, comment=dummy_comment)
         return self.create_failure_summary(error_message)
 
@@ -62,21 +57,17 @@ class BaseMediaPipeline(ABC):
         valid_results = ok_count + skipped_count
 
         if expected_count == 0:
-            file_success = Status.SKIPPED.value
             file_comment = "Configured range does not overlap this file; nothing was extracted"
-        elif valid_results == expected_count and expected_count > 0:
-            file_success = Status.OK.value
+        elif valid_results == expected_count:
             if skipped_count > 0:
                 file_comment = (f"Processed {expected_count} candidates: {ok_count} saved, "
                                 f"{skipped_count} skipped (static/duplicate)")
             else:
                 file_comment = f"Successfully saved all {expected_count} requested frames"
         elif valid_results > 0:
-            file_success = Status.PARTIAL_FAILURE.value
             file_comment = (f"Target {expected_count} candidates: {ok_count} saved, "
                             f"{skipped_count} skipped, {failed_count} failed")
         else:
-            file_success = Status.FAILURE.value
             file_comment = f"All {expected_count} candidates failed to process"
 
         unique_errors = list(dict.fromkeys(error_summaries))
@@ -84,9 +75,8 @@ class BaseMediaPipeline(ABC):
             file_comment += f" | Details: {'; '.join(unique_errors)}"
 
         return FileSummary(
-            total_discovered_pages=total_pages,
-            applied_range_string=range_string,
-            range_status_code=range_status,
-            final_aggregate_status=file_success,
-            final_aggregate_comment=file_comment
+            total_pages=total_pages,
+            page_range=range_string,
+            range_status=range_status,
+            file_to_jpegs_comment=file_comment
         )

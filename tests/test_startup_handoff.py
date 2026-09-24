@@ -17,6 +17,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 import main as main_module
+import user_data
 
 
 def blank_module(name: str) -> Any:
@@ -24,6 +25,7 @@ def blank_module(name: str) -> Any:
 
 FAKE_PORT = 45678
 FAKE_SESSION_TOKEN = "fake-session-token-for-the-handoff-tests"
+FAKE_APP_DATA = Path("C:/fake-appdata/SevasMediaProcessor")
 T = 5.0
 
 
@@ -119,6 +121,7 @@ class StartupHarness:
         mod.windows = []
         mod.settings = {}
         mod.scenario = None
+        mod.start_kwargs = None
         mod.screens = [types.SimpleNamespace(x=0, y=0, width=1920, height=1200)]
 
         def create_window(title, **kwargs):
@@ -127,6 +130,7 @@ class StartupHarness:
             return window
 
         def start(**kwargs):
+            mod.start_kwargs = kwargs
             if mod.scenario is not None:
                 mod.scenario(*mod.windows)
 
@@ -138,6 +142,7 @@ class StartupHarness:
         mod = blank_module("config_loader")
         mod.get_env_tokens = lambda: {}
         mod.log_settings_errors = lambda errors: None
+        mod.get_app_data_dir = lambda: FAKE_APP_DATA
 
         def load_for_ui():
             if self.backend_gate is not None:
@@ -217,6 +222,14 @@ def test_happy_path_splash_shows_then_main_replaces_it(startup):
     assert seen["main_show_calls"] == 1, "main window must be shown exactly once"
     assert seen["splash_destroy_calls"] == 1, "splash must be destroyed exactly once"
     assert startup.panic_calls == []
+
+
+def test_the_window_profile_lives_in_the_apps_own_appdata_folder(startup):
+    startup.run(None)
+    kwargs = startup.webview.start_kwargs
+    assert kwargs is not None, "webview.start was never called"
+    assert kwargs["private_mode"] is False and kwargs["debug"] is False
+    assert Path(kwargs["storage_path"]) == FAKE_APP_DATA / user_data.WEBVIEW_PROFILE_DIR_NAME
 
 
 def test_blank_page_loaded_event_never_reveals_main_window(startup):

@@ -61,3 +61,28 @@ def test_pyright_finds_nothing():
         "a real fix, and give any suppression a stated reason):\n"
         + "\n".join(findings)
     )
+
+
+INVISIBLE_CODE_POINTS = "\ufeff\u200b\u200c\u200d\u2060"
+
+
+def _python_sources():
+    for target in LINT_TARGETS:
+        yield from sorted((REPO_ROOT / target).rglob("*.py"))
+
+
+def test_no_source_line_carries_an_invisible_code_point():
+    offenders = []
+    for path in _python_sources():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if any(ch in line for ch in INVISIBLE_CODE_POINTS):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{number}")
+    assert not offenders, (
+        "invisible code points written literally (spell them as \\uXXXX escapes):\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_the_invisible_sweep_can_see():
+    assert any(ch in "a\u200bb" for ch in INVISIBLE_CODE_POINTS)
+    assert not any(ch in "a\\u200bb" for ch in INVISIBLE_CODE_POINTS)

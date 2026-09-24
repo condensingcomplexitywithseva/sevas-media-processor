@@ -61,7 +61,7 @@ class StaticImagePipeline(BaseMediaPipeline):
                     indices, range_status = range_result.indices, range_result.status
                     if range_result.details:
                         error_summaries.append(range_result.details)
-                    range_string = self.page_selector.format_range_string(indices, truncate=False)
+                    range_string = self.page_selector.format_range_string(indices)
 
                 if not indices:
                     return self.finalize_results(

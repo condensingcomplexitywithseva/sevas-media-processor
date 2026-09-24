@@ -10,9 +10,11 @@ from pathlib import Path
 from collections import deque
 from datetime import datetime
 import queue
-from schemas import Status, PageResult, FileSummary
+from collections.abc import Sequence
+from schemas import RequestOutcome, RequestStatus, Status, PageResult
 from fs_utils import humanize_paths
 from config_loader import get_app_data_dir
+from user_data import LOGS_DIR_NAME
 import contextlib
 
 VALID_LOG_LEVELS = {
@@ -71,22 +73,36 @@ class SystemLogger:
                 f"[{unique_file_id}] Frame {page_result.page_number} SAVED: "
                 f"{page_result.output_filename}")
 
-    def log_file_completed(self, unique_file_id: int, file_summary: FileSummary) -> None:
-        if file_summary.final_aggregate_status == Status.OK.value:
-            self.app_logger.info(f"[{unique_file_id}] COMPLETED SUCCESSFULLY: {file_summary.final_aggregate_comment}")
+    def log_file_completed(self, unique_file_id: int, jpegs_status: str,
+                           comment: str) -> None:
+        if jpegs_status == Status.OK.value:
+            self.app_logger.info(f"[{unique_file_id}] COMPLETED SUCCESSFULLY: {comment}")
         else:
             self.app_logger.warning(
                 f"[{unique_file_id}] COMPLETED WITH ISSUES "
-                f"({file_summary.final_aggregate_status.upper()}): "
-                f"{file_summary.final_aggregate_comment}")
+                f"({jpegs_status.upper()}): {comment}")
 
-    def log_llm_completed(self, unique_file_id: int, status_override: str, llm_error: str) -> None:
-        if status_override == Status.LLM_FAILED.value:
-            self.app_logger.error(f"[{unique_file_id}] AI NETWORK FATAL ERROR: {llm_error}")
-        elif status_override == Status.LLM_PARTIAL.value:
-            self.app_logger.warning(f"[{unique_file_id}] AI NETWORK PARTIAL SUCCESS: {llm_error}")
+    def log_llm_completed(self, unique_file_id: int,
+                          outcomes: Sequence[RequestOutcome]) -> None:
+        failed = [outcome for outcome in outcomes
+                  if outcome.status != RequestStatus.OK.value]
+        errors = " | ".join(outcome.error for outcome in outcomes if outcome.error)
+        unfinished = {RequestStatus.ABORTED_BY_USER.value,
+                      RequestStatus.NOT_ATTEMPTED.value}
+        if outcomes and all(outcome.status in unfinished for outcome in outcomes):
+            self.app_logger.warning(
+                f"[{unique_file_id}] AI analysis did not complete: "
+                f"{len(outcomes)} request(s) unfinished.")
+        elif not failed:
+            self.app_logger.info(
+                f"[{unique_file_id}] AI Analysis Completed Successfully "
+                f"({len(outcomes)} request(s)).")
+        elif len(failed) < len(outcomes):
+            self.app_logger.warning(
+                f"[{unique_file_id}] AI NETWORK PARTIAL SUCCESS "
+                f"({len(failed)} of {len(outcomes)} request(s) failed): {errors}")
         else:
-            self.app_logger.info(f"[{unique_file_id}] AI Analysis Completed Successfully.")
+            self.app_logger.error(f"[{unique_file_id}] AI NETWORK FATAL ERROR: {errors}")
 
     def log_critical_error(self, module_name: str, error_message: str) -> None:
         self.app_logger.critical(f"CRITICAL SYSTEM CRASH [{module_name}]: {error_message}")
@@ -167,7 +183,7 @@ def setup_logging(log_level, memory_buffer_handler=None) -> None:
         root = logging.getLogger()
         root.setLevel(resolve_log_level(log_level))
 
-        logs_dir = get_app_data_dir() / "logs"
+        logs_dir = get_app_data_dir() / LOGS_DIR_NAME
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         try:

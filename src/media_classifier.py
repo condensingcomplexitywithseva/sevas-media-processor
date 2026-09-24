@@ -24,6 +24,7 @@ IMAGE_EXTENSIONS = frozenset([".jpeg", ".jpg", ".jpe", ".jfif", ".png", ".bmp", 
                               ".tif", ".tiff", ".heic", ".heif", ".avif"])
 PDF_EXTENSIONS = frozenset([".pdf"])
 VIDEO_EXTENSIONS = frozenset([".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm"])
+SUPPORTED_EXTENSIONS = ANIMATED_IMAGE_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS | VIDEO_EXTENSIONS
 
 
 class MediaClassifier:
@@ -83,11 +84,6 @@ class MediaClassifier:
             )
 
         relative_path, is_orphaned = self.relative_or_orphan(target_path, root_folder)
-        fallback_msg = (
-            f" [Orphaned path fallback. Original location: {target_path.absolute()}]"
-            if is_orphaned
-            else ""
-        )
 
         extension = target_path.suffix.lower()
 
@@ -144,7 +140,7 @@ class MediaClassifier:
                 return self._build_rejection_payload(
                     relative_path,
                     extension,
-                    f"Unsupported file extension: {extension}{fallback_msg}",
+                    f"Unsupported file extension: {extension}",
                     is_orphaned,
                 )
 
@@ -152,7 +148,7 @@ class MediaClassifier:
             return self._build_rejection_payload(
                 relative_path,
                 extension,
-                f"Internal routing crash: {routing_crash!s}{fallback_msg}\n{traceback.format_exc()}",
+                f"Internal routing crash: {routing_crash!s}\n{traceback.format_exc()}",
                 is_orphaned,
             )
 
@@ -164,11 +160,10 @@ class MediaClassifier:
                 page_number=1, output_filename="", success=Status.FAILURE.value, comment=error_msg
             )
             return FileSummary(
-                total_discovered_pages=0,
-                applied_range_string="",
-                range_status_code=Status.FAILURE.value,
-                final_aggregate_status=Status.FAILURE.value,
-                final_aggregate_comment=error_msg,
+                total_pages=0,
+                page_range="",
+                range_status=Status.FAILURE.value,
+                file_to_jpegs_comment=error_msg,
             )
 
         return relative_path, extension, "Rejected", rejection_generator(), is_orphaned

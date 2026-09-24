@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
+import copy
+from collections import OrderedDict
+import hashlib
+import hmac
+import secrets
+from contextlib import contextmanager
 import json
 import logging
 import re
@@ -12,13 +18,16 @@ from typing import Any, ClassVar
 from pydantic import ValidationError
 
 from config_validator import (
+    AI_TAB_FIELDS,
     ProviderConfig,
+    provider_entry,
     Settings,
     SettingsAIDormant,
     resolve_ai_enabled,
     validate_business_rules,
 )
 from schemas import ConfigurationError
+from user_data import ENV_FILE_NAME, SETTINGS_FILE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +120,29 @@ class TokenManager:
                 self.env_path, "".join(f"{k}={v}\n" for k, v in existing_env.items())
             )
 
+class SettingsOperations:
+    RETAINED_RECEIPTS = 64
+
+    def __init__(self):
+        self.epoch = secrets.token_hex(16)
+        self._digest_key = secrets.token_bytes(32)
+        self.revision = 0
+        self.expired_through = -1
+        self.receipts: OrderedDict[str, tuple[str, dict[str, Any], int, int]] = OrderedDict()
+        self.token_wipes: dict[str, int] = {}
+        self.reset_revision = 0
+        self.backup_path = ""
+
+    def fingerprint(self, path: str, body: bytes) -> str:
+        return hmac.new(self._digest_key, path.encode() + b"\0" + body, hashlib.sha256).hexdigest()
+
+    def remember(self, identity: str, digest: str, result: dict[str, Any], code: int, base: int):
+        self.receipts[identity] = (digest, result, code, base)
+        while len(self.receipts) > self.RETAINED_RECEIPTS:
+            _, (_, _, _, expired_base) = self.receipts.popitem(last=False)
+            self.expired_through = max(self.expired_through, expired_base)
+
+
 class ConfigManager:
 
     _lock = threading.RLock()
@@ -118,10 +150,11 @@ class ConfigManager:
     def __init__(self, root_dir: Path):
         with self._lock:
             self.root_dir = root_dir
-            self.settings_path = root_dir / "settings.json"
+            self.settings_path = root_dir / SETTINGS_FILE_NAME
             self.app_data_dir = self._get_app_data_dir()
-            self.env_path = self.app_data_dir / ".env"
+            self.env_path = self.app_data_dir / ENV_FILE_NAME
             self.token_manager = TokenManager(self.env_path)
+            self.operations = SettingsOperations()
 
     def _get_app_data_dir(self) -> Path:
         return (
@@ -156,6 +189,32 @@ class ConfigManager:
             _, errors, merged = self._validate(raw_data)
             return merged, errors
 
+    def settings_with_edits(self, edits: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            raw = {}
+            if self.settings_path.exists():
+                raw = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or not isinstance(edits, dict):
+                raise ValueError("Settings and edits must be objects")
+            raw.pop("ENV_TOKENS", None)
+            providers = Settings().LLM_PROVIDERS
+            for name, value in edits.items():
+                parts = name.split(".")
+                known = (len(parts) == 1 and name in Settings.model_fields
+                         and name not in {"LLM_PROVIDERS", "ENV_TOKENS"})
+                provider_field = (len(parts) == 3 and parts[0] == "LLM_PROVIDERS"
+                                  and parts[1] in providers and parts[2] in ProviderConfig.model_fields)
+                token_field = len(parts) == 2 and parts[0] == "ENV_TOKENS" and parts[1] in providers
+                if not (known or provider_field or token_field):
+                    raise ValueError("Unknown settings control")
+                target = raw
+                for part in parts[:-1]:
+                    if not isinstance(target.get(part), dict):
+                        target[part] = {}
+                    target = target[part]
+                target[parts[-1]] = copy.deepcopy(value)
+            return raw
+
     def validate_draft(
         self, raw_data: dict[str, Any]
     ) -> tuple[Settings | None, dict[str, Any], dict[str, Any]]:
@@ -183,6 +242,8 @@ class ConfigManager:
         try:
             model = Settings if ai_enabled else SettingsAIDormant
             settings_obj = model(**raw_data)
+            preserved = AI_TAB_FIELDS if not ai_enabled else {"LLM_PROVIDERS"}
+            settings_obj._unsupplied_ai_fields = set(preserved - raw_data.keys())
         except ValidationError as e:
             errors.update(self._parse_pydantic_errors(e))
 
@@ -200,12 +261,18 @@ class ConfigManager:
         if ai_enabled:
             selected = str(merged.get("LLM_PROVIDER") or "")
             providers = merged.get("LLM_PROVIDERS")
-            if isinstance(providers, dict):
-                key = selected if selected in providers else "custom"
-                entry = providers.get(key)
+            if isinstance(providers, dict) and selected in Settings().LLM_PROVIDERS:
+                key = selected
+                entry = provider_entry(providers, key)
                 if isinstance(entry, dict):
                     try:
-                        ProviderConfig(**entry)
+                        active = ProviderConfig(**entry)
+                        if settings_obj is not None:
+                            stored = settings_obj.LLM_PROVIDERS.get(selected)
+                            if isinstance(stored, dict):
+                                typed = active.model_dump()
+                                for field in stored.keys() & ProviderConfig.model_fields.keys():
+                                    stored[field] = typed[field]
                     except ValidationError as e:
                         for loc, err in self._parse_pydantic_errors(e).items():
                             errors[f"LLM_PROVIDERS.{key}.{loc}"] = err
@@ -253,17 +320,21 @@ class ConfigManager:
                     with open(self.settings_path, encoding="utf-8") as f:
                         raw_data = json.load(f)
                 except json.JSONDecodeError as e:
-                    raise ConfigurationError(f"Settings file is corrupted: {e}") from e
+                    raise ConfigurationError(f"i18n:err_broken_json|{e}") from e
                 except Exception as e:
                     raise ConfigurationError(
-                        f"Settings file could not be read: {type(e).__name__}: {e}"
+                        f"i18n:err_settings_unreadable|{type(e).__name__}: {e}"
                     ) from e
 
             settings_obj, errors, _ = self._validate(raw_data)
             if errors:
                 first_err_loc = next(iter(errors))
-                first_err_msg = errors[first_err_loc].get("value", "Validation error")
-                raise ConfigurationError(f"Configuration error at {first_err_loc}: {first_err_msg}")
+                first_error = errors[first_err_loc]
+                first_err_msg = first_error.get("value", "Validation error")
+                raise ConfigurationError(
+                    f"i18n:err_settings_invalid|{first_err_msg}",
+                    setting_field=first_err_loc if first_err_loc != "general" else "",
+                    detail_key=first_err_msg if first_error.get("type") == "i18n" else "")
 
             assert settings_obj is not None
             return settings_obj
@@ -272,7 +343,8 @@ class ConfigManager:
         with self._lock:
             try:
                 self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_write_text(self.settings_path, settings.model_dump_json(indent=4))
+                _atomic_write_text(self.settings_path, settings.model_dump_json(
+                    indent=4, exclude=settings._unsupplied_ai_fields - settings.model_fields_set))
             except Exception as e:
                 logger.error(f"Failed to save settings: {e}")
                 raise
@@ -311,6 +383,20 @@ def load_strict():
 
 def load_for_ui():
     return _manager.load_for_ui()
+
+
+@contextmanager
+def settings_transaction():
+    with _manager._lock:
+        yield
+
+
+def settings_operations() -> SettingsOperations:
+    return _manager.operations
+
+
+def settings_with_edits(edits: dict):
+    return _manager.settings_with_edits(edits)
 
 
 def validate_draft(raw_data: dict):

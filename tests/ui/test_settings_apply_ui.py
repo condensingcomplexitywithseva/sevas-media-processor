@@ -15,7 +15,7 @@ def test_apply_commits_to_disk_and_resets_state(open_page, tmp_path):
         "Apply must enable for a real change"
 
     page.click("#btn-apply")
-    page.wait_for_function("document.getElementById('btn-apply').disabled")
+    page.wait_for_function("!window.settingsSavePending && document.getElementById('btn-apply').disabled")
 
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved.get("JPEG_QUALITY") == 77, \

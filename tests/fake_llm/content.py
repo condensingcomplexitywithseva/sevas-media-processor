@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 
-DEFAULT_ANSWER = "The quick brown fox jumps over the lazy dog."
+DEFAULT_ANSWER = '{"answer": "The quick brown fox jumps over the lazy dog."}'
 
 DEFAULT_THINKING = (
     "Let me look at the image carefully. I can make out printed text. "

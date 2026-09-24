@@ -6,7 +6,7 @@
 def _form_field_ids(page):
     return page.evaluate(
         """() => Array.from(
-               document.querySelectorAll('#output-settings-form input')
+               document.querySelectorAll('#output-settings-form input:not([type="hidden"])')
            ).map(i => i.id)"""
     )
 
@@ -38,23 +38,25 @@ def test_output_tab_field_order_and_preamble(open_page):
         "JPEG_QUALITY",
         "LOWEST_QUALITY",
         "MAX_FILE_SIZE_KB",
+        "OUTPUT_FILENAME_PREFIX_LENGTH",
+        "OUTPUT_FILENAME_TIMESTAMPS",
         "WHITE_BACKGROUND",
         "PILLOW_MAX_PIXELS",
     ]
     inputs_before_advanced = page.evaluate(
         """() => {
             const header = document.querySelector(
-                '#output-settings-form .section-header');
+                '#output-settings-form [data-i18n="lbl_adv_general"]');
             let n = 0;
             for (const input of document.querySelectorAll(
-                     '#output-settings-form input')) {
+                     '#output-settings-form input:not([type="hidden"])')) {
                 if (header.compareDocumentPosition(input)
                         & Node.DOCUMENT_POSITION_PRECEDING) n++;
             }
             return n;
         }"""
     )
-    assert inputs_before_advanced == 4
+    assert inputs_before_advanced == 6
 
 
 def test_size_field_labels_and_hints_in_both_languages(open_page):
@@ -77,9 +79,9 @@ def test_size_field_labels_and_hints_in_both_languages(open_page):
     assert "soft target" in en["max_size"]
     assert "Max Resolution" in en["max_size"], "size hint points at the real lever"
     assert "discolored" in en["lowest"] and "default of 20" in en["lowest"]
-    assert "Text Sharpness 2 + Max Resolution 2560" in en["pdf"]
-    assert "Text Sharpness 1 + Max Resolution 1920" in en["pdf"]
-    assert "Output Quality" in en["pdf"]
+    assert "Text Sharpness 2 + Max Resolution (px) 1920 (default)" in en["pdf"]
+    assert "Text Sharpness 1 + Max Resolution (px) 1920" in en["pdf"]
+    assert page.locator('[data-i18n="hint_pdf_scale"] a[data-setting="MAX_DIMENSION"]').count() == 4
 
     page.evaluate("changeLanguage('ru')")
     page.wait_for_timeout(300)
@@ -88,6 +90,34 @@ def test_size_field_labels_and_hints_in_both_languages(open_page):
     assert "3840 (4K)" in ru["max_dim"] and "2560 (QHD)" in ru["max_dim"]
     assert "Мягкая цель" in ru["max_size"]
     assert "значение по умолчанию 20" in ru["lowest"]
-    assert "Резкость текста 2 + Макс. разрешение 2560" in ru["pdf"]
-    assert "Резкость текста 1 + Макс. разрешение 1920" in ru["pdf"]
-    assert "Качество результата" in ru["pdf"], "PDF hint names the Output tab's visible RU name"
+    assert "Резкость текста 2 + Макс. разрешение (px) 1920 (по умолчанию)" in ru["pdf"]
+    assert "Резкость текста 1 + Макс. разрешение (px) 1920" in ru["pdf"]
+    assert page.locator('[data-i18n="hint_pdf_scale"] a').first.inner_text() == "Макс. разрешение (px)"
+
+
+
+def test_pdf_setting_links_wrap_as_units_without_overflow(open_page):
+    from pathlib import Path
+    page = open_page({})
+    page.set_viewport_size({'width': 1280, 'height': 800})
+    languages = sorted(p.stem for p in (Path(__file__).resolve().parents[2] / 'src/locales').glob('*.json'))
+    for language in languages:
+        page.evaluate('changeLanguage', language)
+        page.evaluate("switchTab('docs')")
+        state = page.locator('[data-i18n="hint_pdf_scale"]').evaluate("""hint => {
+            const rect = hint.getBoundingClientRect();
+            return [...hint.querySelectorAll('a')].map(link => {
+                const range = document.createRange(); range.selectNodeContents(link);
+                const lines = [...new Set([...range.getClientRects()].map(r => Math.round(r.top)))];
+                const box = link.getBoundingClientRect();
+                return {lines: lines.length, fits: box.right <= rect.right + 1, text: link.textContent};
+            });
+        }""")
+        assert state and all(s['lines'] == 1 and s['fits'] for s in state), state
+    page.evaluate("""() => {
+        document.querySelector('[data-i18n="lbl_max_dim"]').textContent = 'Long setting label '.repeat(12);
+        applyTranslations = () => {};
+        const hint = document.querySelector('[data-i18n="hint_pdf_scale"]');
+        renderMessage(hint, {key:'hint_pdf_scale', refs:{resolution:'MAX_DIMENSION'}});
+    }""")
+    assert page.locator('[data-i18n="hint_pdf_scale"]').evaluate('el => el.scrollWidth <= el.clientWidth + 1')

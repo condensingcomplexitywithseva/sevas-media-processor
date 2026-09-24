@@ -17,7 +17,8 @@ def read_banner(page):
         return {
             banner_visible: !!(banner && getComputedStyle(banner).display !== 'none'),
             banner_is_column: banner ? getComputedStyle(banner).flexDirection : null,
-            row_count: banner ? banner.querySelectorAll('.banner-row').length : 0,
+            row_count: banner ? Array.from(banner.querySelectorAll('.banner-row'))
+                .filter(row => getComputedStyle(row).display !== 'none').length : 0,
             jump_btn_is_first_in_message: !!(first && first.nodeType === 1
                 && first.classList.contains('banner-jump-btn')),
             jump_btn_text: first && first.nodeType === 1 ? first.textContent : null,
@@ -43,8 +44,8 @@ def test_banner_layout_with_ai_only_errors(open_page):
     assert state["jump_btn_margin_right"] == "8px", \
         "message jump button needs its own gap — the row gap does not reach inside the text span"
     assert state["hint_visible"], "AI escape-hatch hint must show for AI errors in AI mode"
-    assert "Don't need AI?" in state["hint_text"]
-    assert '"Turn media files to JPEGs"' in state["hint_text"], \
+    assert "AI is optional." in state["hint_text"]
+    assert "Main Application Mode" in state["hint_text"], \
         "the hint must name the exact mode to switch to"
     assert not state["warn_general_visible"], "General tab must not be flagged for AI-only errors"
     assert state["warn_ai_visible"]
@@ -53,7 +54,7 @@ def test_banner_layout_with_ai_only_errors(open_page):
 def test_goto_setting_navigates_without_touching_value(open_page):
     page = open_page(AI_TOKEN_ERROR)
     value_before = page.evaluate("document.getElementById('ENABLE_LLM_INFERENCE').value")
-    page.click("#global-error-ai-hint .banner-jump-btn")
+    page.click("#global-error-ai-hint a")
     page.wait_for_timeout(400)
     state = page.evaluate(
         """() => {
@@ -119,7 +120,7 @@ def test_banner_strings_render_in_russian(open_page):
     page.wait_for_timeout(300)
     state = read_banner(page)
     assert state["jump_btn_text"] == "К ошибке"
-    assert "Не нужен ИИ?" in state["hint_text"]
-    assert "«Превращаем файлы в JPEG»" in state["hint_text"], \
+    assert "ИИ необязателен." in state["hint_text"]
+    assert "Основной режим работы" in state["hint_text"], \
         "the RU hint must name the exact mode to switch to"
-    assert "К настройке" in state["hint_text"]
+    assert page.locator("#global-error-ai-hint a").get_attribute("data-setting") == "ENABLE_LLM_INFERENCE"

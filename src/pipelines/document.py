@@ -83,7 +83,7 @@ class DocumentPipeline(BaseMediaPipeline):
                     if range_status == RangeStatus.OK.value:
                         range_status = RangeStatus.TRUNCATED.value
 
-                range_string = self.page_selector.format_range_string(indices, truncate=False)
+                range_string = self.page_selector.format_range_string(indices)
 
                 if not indices:
                     logger.info(f"Skipping {self.relative_path}: Range out of bounds.")

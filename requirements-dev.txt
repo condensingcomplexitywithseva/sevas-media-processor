@@ -2,5 +2,6 @@
 # The UI tests also need a browser: venv\Scripts\python.exe -m playwright install chromium
 pytest==9.1.1
 pytest-xdist==3.8.0
+pytest-timeout==2.4.0
 playwright==1.62.0
 ruff==0.16.3

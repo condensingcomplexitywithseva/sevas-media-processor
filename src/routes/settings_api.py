@@ -6,15 +6,87 @@ import os
 import re
 import subprocess
 import logging
+from functools import wraps
+from typing import Any
 from pathlib import Path
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
+from werkzeug.exceptions import HTTPException
 from config_loader import (Settings, ROOT_DIR, get_masked_env_tokens, get_settings_path,
                            update_env_tokens, load_for_ui, validate_draft, save_settings,
                            log_settings_errors, real_token_updates, is_broken_file)
+from config_loader import settings_with_edits, settings_transaction, settings_operations
+from config_validator import settings_form_view, settings_form_repair_fields
 from fs_utils import get_safe_path, text_looks_binary
 
 api_blueprint = Blueprint('api', __name__)
 logger = logging.getLogger(__name__)
+
+
+def settings_snapshot():
+    operations = settings_operations()
+    merged, errors = load_for_ui()
+    return {
+        "epoch": operations.epoch, "revision": operations.revision,
+        "settings": settings_form_view(merged),
+        "repair_fields": settings_form_repair_fields(merged),
+        "env_tokens": get_masked_env_tokens(), "errors": errors,
+        "token_wipes": dict(operations.token_wipes),
+        "reset_revision": operations.reset_revision, "backup_path": operations.backup_path,
+    }
+
+
+def settings_operation(function):
+    @wraps(function)
+    def operation():
+        operations = settings_operations()
+        identity = request.headers.get("X-Settings-Operation", "")
+        base = operations.revision
+        digest = ""
+        if identity:
+            epoch = request.headers.get("X-Settings-Epoch", "")
+            revision = request.headers.get("X-Settings-Revision", "")
+            if (epoch != operations.epoch or not re.fullmatch(r"[a-f0-9-]{36}", identity)
+                    or not revision.isdecimal() or int(revision) > operations.revision):
+                return jsonify(status="fatal", message_key="err_settings_operation_unknown"), 409
+            base = int(revision)
+            digest = operations.fingerprint(request.path, request.get_data())
+            previous = operations.receipts.get(identity)
+            if previous:
+                original_digest, result, code, _ = previous
+                if original_digest != digest:
+                    return jsonify(status="fatal", message_key="err_settings_operation_unknown"), 409
+                return jsonify(dict(result, snapshot=settings_snapshot())), code
+            if base <= operations.expired_through:
+                return jsonify(status="fatal", message_key="err_settings_operation_unknown"), 409
+
+        if identity and function.__name__ == "commit_settings" and base != operations.revision:
+            result: dict[str, Any] = {"status": "superseded", "message_key": "err_settings_changed_retry"}
+            code = 409
+        else:
+            try:
+                response = make_response(function())
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.exception("Settings operation failed")
+                response = make_response(jsonify(status="fatal", message=str(exc)), 500)
+            result = response.get_json()
+            code = response.status_code
+
+        operations.revision += 1
+        if function.__name__ == "wipe_token" and result.get("status") == "success":
+            operations.token_wipes[request.get_json()["provider"]] = operations.revision
+        if function.__name__ == "reset_settings":
+            operations.reset_revision = operations.revision
+            if result.get("status") == "success":
+                operations.backup_path = result.get("backup_path", "")
+        if function.__name__ == "commit_settings" and result.get("status") == "success":
+            operations.backup_path = ""
+        result["operation_revision"] = operations.revision
+        if identity:
+            operations.remember(identity, digest, result, code, base)
+        return jsonify(dict(result, snapshot=settings_snapshot())), code
+    return operation
 
 
 def unflatten_dict(flat_dict: dict) -> dict:
@@ -33,7 +105,13 @@ def unflatten_dict(flat_dict: dict) -> dict:
     return result
 
 @api_blueprint.route('/settings/commit', methods=['POST'])
+@settings_transaction()
+@settings_operation
 def commit_settings():
+    body = request.get_json()
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "errors": {
+            "general": {"type": "i18n", "value": "err_settings_invalid"}}}), 400
     logger.info("Synchronizing configuration changes with disk storage...")
 
     _, current_errors = load_for_ui()
@@ -42,15 +120,23 @@ def commit_settings():
                        "is corrupted. Cannot safely commit UI changes.")
         return jsonify({"status": "error", "errors": current_errors}), 400
 
-    payload = unflatten_dict(request.json)
     try:
+        if set(body) == {"edits"}:
+            try:
+                payload = settings_with_edits(body["edits"])
+            except (ValueError, TypeError, AttributeError):
+                return jsonify({"status": "error", "errors": {
+                    "general": {"type": "i18n", "value": "err_settings_invalid"}}}), 400
+        else:
+            payload = unflatten_dict(body)
+
         logger.info("Running pre-commit validation suite...")
         settings_obj, errors, merged = validate_draft(payload)
 
         if errors:
             log_settings_errors(errors)
             logger.warning(f"Synchronization ABORTED: {len(errors)} validation errors detected.")
-            return jsonify({"status": "error", "settings": merged, "errors": errors}), 400
+            return jsonify({"status": "error", "settings": settings_form_view(merged), "errors": errors}), 400
 
         logger.info("Validation SUCCESS. Committing changes to settings.json.")
 
@@ -67,7 +153,8 @@ def commit_settings():
 
         return jsonify({
             "status": "success",
-            "settings": merged,
+            "settings": settings_form_view(merged),
+            "repair_fields": settings_form_repair_fields(merged),
             "errors": fresh_errors,
             "env_tokens": get_masked_env_tokens()
         }), 200
@@ -77,6 +164,8 @@ def commit_settings():
         return jsonify({"status": "fatal", "message": str(e)}), 500
 
 @api_blueprint.route('/settings/wipe_token', methods=['POST'])
+@settings_transaction()
+@settings_operation
 def wipe_token():
     data = request.json or {}
     provider = data.get("provider")
@@ -114,8 +203,7 @@ def open_settings_file():
             return jsonify({
                 "status": "error",
                 "message_key": "err_no_settings_backup",
-                "path": str(active_path.parent),
-                "message": f"No corrupted-settings backup was found in {active_path.parent}",
+                "message": "There is no settings backup to open. Reset cannot recover an earlier missing file.",
             }), 404
         target_path = sorted(backups)[-1]
     else:
@@ -142,6 +230,8 @@ def open_settings_file():
         }), 500
 
 @api_blueprint.route('/settings/reset', methods=['POST'])
+@settings_transaction()
+@settings_operation
 def reset_settings():
     try:
         active_path = get_settings_path()

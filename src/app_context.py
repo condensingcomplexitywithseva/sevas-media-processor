@@ -3,21 +3,25 @@
 
 
 import logging
+import hashlib
+import json
+import os
 import threading
 import time
 import traceback
 from pathlib import Path
 
 import windows_shell
-from config_validator import Settings
+from config_validator import AI_TAB_FIELDS, NON_IDENTITY_SETTINGS, Settings, parse_output_columns
 from fs_utils import get_safe_path, humanize_paths
+from schemas import ConfigurationError, RunConfiguration, exception_message
 from to_jpeg_converter import ToJpegConverter
 from range_parsers import PageRangeSelector, VideoSelector
 from llm_client import LLMClient
 from db_controller import SQLiteDatabaseController
 from media_classifier import MediaClassifier
 from batch_orchestrator import BatchOrchestrator
-from data_exporter import SQLiteDataExporter
+from data_exporter import SQLiteDataExporter, ExportError
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,45 @@ def _format_os_error(error: OSError) -> str:
     return humanize_paths(f"{code} {message}{paths}".strip())
 
 
+def _spell_configuration_value(value) -> str:
+    if isinstance(value, tuple):
+        return ", ".join(value) or "-"
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return str(value) or "-"
+
+
+def run_configuration_of(settings: Settings) -> RunConfiguration:
+    if not settings.ENABLE_LLM_INFERENCE:
+        return RunConfiguration(False, "", ())
+    return RunConfiguration(True, str(settings.LLM_OUTPUT_MODE),
+                            tuple(parse_output_columns(settings.LLM_OUTPUT_COLUMNS)))
+
+
+def processing_identity(settings: Settings, llm: LLMClient | None) -> tuple[str, str]:
+    values = {name: getattr(settings, name) for name in Settings.model_fields
+              if name not in NON_IDENTITY_SETTINGS | AI_TAB_FIELDS | {"INPUT_FOLDER_PATH"}}
+    inactive_mode = "SAMPLING" if settings.VIDEO_MODE == "SUMMARY" else "SUMMARY"
+    values = {name: value for name, value in values.items()
+              if not name.startswith(f"VIDEO_{inactive_mode}_")}
+    for name in ("IMAGE_RANGE", "DOCUMENT_RANGE", "ANIMATION_RANGE"):
+        values[name] = PageRangeSelector(getattr(settings, name)).segments
+    values["VIDEO_RANGE"] = VideoSelector(settings.VIDEO_RANGE).segments
+    if llm is not None:
+        values["ai"] = llm.processing_semantics()
+    root = json.dumps(os.path.normcase(str(settings.INPUT_FOLDER_PATH.resolve())), ensure_ascii=True)
+    canonical = json.dumps(values, sort_keys=True, ensure_ascii=True)
+    return root, hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def describe_configuration_change(recorded: RunConfiguration,
+                                  current: RunConfiguration) -> str:
+    return "; ".join(
+        f"{name}: {_spell_configuration_value(before)} -> {_spell_configuration_value(after)}"
+        for name, before, after in zip(RunConfiguration._fields, recorded, current, strict=True)
+        if before != after)
+
+
 class ProcessorCore:
 
     def __init__(self, settings: Settings, abort_flag: threading.Event, on_progress=None):
@@ -51,7 +94,6 @@ class ProcessorCore:
         safe_run_folder = Path(get_safe_path(self.settings.CURRENT_RUN_FOLDER))
         if self.settings.START_OVER and safe_run_folder.exists() and any(safe_run_folder.iterdir()):
             from datetime import datetime
-            from schemas import ConfigurationError
 
             timestamp = (
                 datetime.now().isoformat(timespec="seconds").replace(":", "-").replace("T", "_")
@@ -101,6 +143,15 @@ class ProcessorCore:
         self.db_path = self.settings.TECH_FOLDER_PATH / "application_state.db"
         self.database_controller = SQLiteDatabaseController(self.db_path)
 
+        current = run_configuration_of(self.settings)
+        recorded = self.database_controller.get_run_configuration()
+        if recorded is not None and recorded != current:
+            self.database_controller.close()
+            raise ConfigurationError(
+                f"i18n:err_resume_configuration_changed|{describe_configuration_change(recorded, current)}",
+                setting_field="START_OVER")
+        self.database_controller.record_run_configuration(*current)
+
         import central_logger
         central_logger.setup_logging(self.settings.LOGGING_LEVEL)
         self.system_logger = central_logger.system_logger
@@ -114,15 +165,27 @@ class ProcessorCore:
         )
 
         self.llm = LLMClient(self.settings) if self.settings.ENABLE_LLM_INFERENCE else None
+        try:
+            self.database_controller.ensure_run_identity(*processing_identity(self.settings, self.llm))
+        except Exception:
+            self.database_controller.close()
+            raise
+
+        def range_selector(selector_type, field):
+            try:
+                return selector_type(getattr(self.settings, field))
+            except ConfigurationError as error:
+                error.setting_field = field
+                raise
 
         self.router = MediaClassifier(
             self.settings,
             self.converter,
             self.settings.CURRENT_RUN_FOLDER,
-            PageRangeSelector(self.settings.DOCUMENT_RANGE),
-            PageRangeSelector(self.settings.IMAGE_RANGE),
-            PageRangeSelector(self.settings.ANIMATION_RANGE),
-            VideoSelector(self.settings.VIDEO_RANGE),
+            range_selector(PageRangeSelector, "DOCUMENT_RANGE"),
+            range_selector(PageRangeSelector, "IMAGE_RANGE"),
+            range_selector(PageRangeSelector, "ANIMATION_RANGE"),
+            range_selector(VideoSelector, "VIDEO_RANGE"),
         )
 
         self.orchestrator = BatchOrchestrator(
@@ -134,11 +197,10 @@ class ProcessorCore:
     def shutdown(self):
         if hasattr(self, "database_controller"):
             self.database_controller.close()
-        if hasattr(self, "exporter"):
-            self.exporter.close()
 
     def run(self):
         run_failed = False
+        run_refusal = {}
         try:
             self.settings.apply_library_limits()
 
@@ -146,16 +208,41 @@ class ProcessorCore:
                 abort_flag=self.abort_flag, on_progress=self.on_progress
             )
 
-            self.exporter.export_all_formats(self.settings.TECH_FOLDER_PATH)
-
         except Exception as e:
             run_failed = True
+            if isinstance(e, ConfigurationError) and e.detail_key:
+                run_refusal = exception_message(e)
             error_msg = f"FATAL ERROR during runtime: {e}\n{traceback.format_exc()}"
             logger.error(error_msg)
+
+        export_outcome = None
+        export_failure: dict[str, object] | None = None
+        try:
+            export_outcome = self.exporter.export_all_formats(self.settings.TECH_FOLDER_PATH)
+        except ExportError as e:
+            export_outcome = e.outcome
+            logger.error(f"Report export incomplete: {e}")
+        except Exception as e:
+            logger.error(f"Report export failed: {e}\n{traceback.format_exc()}")
+            export_failure = {"status": "error", "export_state": "unknown",
+                              "message_key": "err_export_outcome_unknown", "detail": str(e),
+                              "path": str(self.settings.TECH_FOLDER_PATH)}
         finally:
             if self.on_progress:
+                result = export_outcome.as_dict() if export_outcome is not None else export_failure
+                if result is not None:
+                    from routes.export_api import number_export_result, remember_export_source
+                    result.pop("database", None)
+                    result["type"] = "export_result"
+                    if export_outcome is not None:
+                        result["export_state"] = "completed"
+                    try:
+                        result["recovery_id"] = remember_export_source(self.db_path)
+                    except OSError:
+                        result["recovery_id"] = None
+                    self.on_progress(number_export_result(result))
                 if run_failed:
-                    self.on_progress({"type": "failed"})
+                    self.on_progress({"type": "failed", **run_refusal})
                 elif self.abort_flag is not None and self.abort_flag.is_set():
                     self.on_progress({"type": "aborted"})
                 else:

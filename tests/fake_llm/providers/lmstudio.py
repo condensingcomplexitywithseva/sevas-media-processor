@@ -12,7 +12,7 @@ from ..content import ContentPolicy, estimate_tokens
 from . import _openai_compat as oai
 
 _MODELS: dict[str, dict] = {
-    "qwen/qwen3.5:0.8b": {
+    "qwen/qwen3.5-2b": {
         "type": "llm", "arch": "qwen3", "quant": "Q4_K_M", "quantization": "Q4_K_M",
         "context_length": 4096, "state": "loaded", "reasoning": True,
     },

@@ -17,12 +17,9 @@ DETAIL = (
 )
 
 SHOW_ARCHIVE_LOCKED_ALERT = """(detail) => {
-    const message = window.getT('alert_config_err', 'Configuration Error')
-        + '\\n\\n'
-        + window.getT('err_archive_locked', 'err_archive_locked')
-        + '\\n\\n(' + detail + ')';
-    window.appAlert(message);
+    window.notice({surface: 'dialog', key: 'err_archive_locked', detail});
 }"""
+
 
 MEASURE = """() => {
     const dialog = document.getElementById('modal-dialog').getBoundingClientRect();
@@ -32,6 +29,8 @@ MEASURE = """() => {
         okTop: ok.top, okBottom: ok.bottom,
         viewport: window.innerHeight,
         message: document.getElementById('modal-message').textContent,
+        detail: document.getElementById('modal-detail').textContent,
+        detailShown: getComputedStyle(document.getElementById('modal-detail')).display !== 'none',
     };
 }"""
 
@@ -48,13 +47,8 @@ def test_archive_locked_alert_fits_the_window_in_every_language(open_page):
 
         box = page.evaluate(MEASURE)
         assert "current_run" in box["message"], f"{lang}: wrong message under test"
-        heading = page.evaluate("() => window.getT('alert_config_err', '')")
-        assert heading and box["message"].startswith(heading + "\n\n"), (
-            f"{lang}: the measured message does not start with the translated "
-            "heading plus a blank line, so it is not composed the way "
-            "app.js composes it"
-        )
-
+        assert box["detailShown"] and box["detail"] == DETAIL, f"{lang}: diagnostic detail missing"
+        assert "WinError" not in box["message"], f"{lang}: the detail leaked into the sentence"
         if box["dialogTop"] < 0 or box["dialogBottom"] > box["viewport"]:
             too_tall.append(
                 f"{lang}: dialog spans {box['dialogTop']:.0f}..{box['dialogBottom']:.0f} "

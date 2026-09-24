@@ -65,7 +65,7 @@ def recorded_pipelines(monkeypatch):
             def process(self):
                 def gen():
                     yield PageResult(1, "f.jpg", Status.OK.value, "")
-                    return FileSummary(1, "1", "ok", Status.OK.value, "done")
+                    return FileSummary(1, "1", "ok", "done")
 
                 return gen()
 
@@ -141,7 +141,7 @@ def test_unsupported_extension_is_rejected_through_the_normal_pathway(
     assert len(results) == 1
     assert results[0].success == Status.FAILURE.value
     assert "Unsupported file extension" in results[0].comment
-    assert summary.final_aggregate_status == Status.FAILURE.value
+    assert summary.range_status == Status.FAILURE.value
 
 
 
@@ -156,7 +156,7 @@ def test_empty_file_is_rejected_before_any_engine_starts(tmp_path, forbidden_pip
 
     assert pipeline_name == "Rejected"
     assert "File is completely empty (0 bytes)." in results[0].comment
-    assert summary.final_aggregate_status == Status.FAILURE.value
+    assert summary.range_status == Status.FAILURE.value
 
 
 
@@ -179,6 +179,24 @@ def test_files_outside_the_input_root_get_unique_orphan_names(tmp_path):
     assert name_inside == str(Path("sub") / "photo.jpg")
 
 
+def test_orphaned_rejection_comments_never_carry_the_orphan_note(tmp_path, forbidden_pipelines):
+    root = tmp_path / "input"
+    root.mkdir()
+    outside = tmp_path / "elsewhere" / "notes.txt"
+    outside.parent.mkdir()
+    outside.write_bytes(b"some content")
+
+    _rel, _ext, pipeline_name, generator, orphaned = make_classifier().evaluate_and_route(
+        1, outside, root
+    )
+    results, summary = drain(generator)
+
+    assert pipeline_name == "Rejected"
+    assert orphaned is True
+    assert "Orphaned path fallback" not in results[0].comment
+    assert "Orphaned path fallback" not in summary.file_to_jpegs_comment
+
+
 
 def test_pipeline_construction_crash_degrades_to_a_rejection(tmp_path, monkeypatch):
     class ExplodingPipeline:
@@ -198,14 +216,14 @@ def test_pipeline_construction_crash_degrades_to_a_rejection(tmp_path, monkeypat
     assert results[0].success == Status.FAILURE.value
     assert "Internal routing crash" in results[0].comment
     assert "engine exploded during init" in results[0].comment
-    assert summary.final_aggregate_status == Status.FAILURE.value
+    assert summary.range_status == Status.FAILURE.value
 
 
 
 class _ProbePipeline(BaseMediaPipeline):
     def process(self):
         yield from ()
-        return FileSummary(0, "", Status.OK.value, Status.OK.value, "")
+        return FileSummary(0, "", Status.OK.value, "")
 
 
 def _naming_probe(relative_path="in.png", **setting_overrides):
@@ -216,10 +234,10 @@ def _naming_probe(relative_path="in.png", **setting_overrides):
 
 
 def test_output_naming_contract_new_scheme():
-    probe = _naming_probe("How To Mod Stronghold 4 Graphics & Style.mp4")
-    assert probe.get_filename(7) == "42_How To Mod Stronghol_page_7.jpg"
+    probe = _naming_probe("How To Paint 4 Castle Walls & Gates.mp4")
+    assert probe.get_filename(7) == "42_How To Paint 4 Castl_page_7.jpg"
     assert probe.get_filename(5, capture_seconds=900.0) == (
-        "42_How To Mod Stronghol_page_5_t00_15_00_00.jpg")
+        "42_How To Paint 4 Castl_page_5_t00_15_00_00.jpg")
     silent = _naming_probe("clip.mp4", OUTPUT_FILENAME_TIMESTAMPS=False)
     assert silent.get_filename(5, capture_seconds=900.0) == "42_clip_page_5.jpg"
     hopeless = _naming_probe("***.png")
@@ -269,10 +287,11 @@ def test_frames_saved_by_a_real_run_are_found_by_the_ai_lookup(tmp_path, monkeyp
 
     db = SQLiteDatabaseController(settings.TECH_FOLDER_PATH / "application_state.db")
     try:
-        frame_paths = db.get_successful_frame_paths(1, settings.CURRENT_RUN_FOLDER)
+        frames = db.get_successful_frames(1, settings.CURRENT_RUN_FOLDER)
     finally:
         db.close()
 
-    assert frame_paths, "the run saved no frames"
-    assert [p.name for p in frame_paths] == ["1_photo_page_1.jpg"]
-    assert all(p.exists() for p in frame_paths)
+    assert frames, "the run saved no frames"
+    assert [(number, path.name, ts) for number, path, ts in frames] == [
+        (1, "1_photo_page_1.jpg", "")]
+    assert all(path.exists() for _, path, _ in frames)

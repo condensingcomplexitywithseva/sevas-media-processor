@@ -1,8 +1,8 @@
 
 <form id="images-settings-form" onsubmit="event.preventDefault();" novalidate>
-    <div class="form-group" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
-        <span style="font-weight: bold;" data-i18n="lbl_supported_img">Supported Extensions:</span>
-        <span style="color: var(--hint-color); margin-left: 10px;">.jpeg, .jpg, .jpe, .jfif, .png, .bmp, .dib, .tif, .tiff, .heic, .heif, .avif</span>
+    <div class="form-group ui-preamble">
+        <span class="ui-strong" data-i18n="lbl_supported_img">Supported Extensions:</span>
+        <span class="ui-inline-hint">.jpeg, .jpg, .jpe, .jfif, .png, .bmp, .dib, .tif, .tiff, .heic, .heif, .avif</span>
     </div>
 
     <div class="form-group">
@@ -18,8 +18,8 @@ Examples:
 • First 10 images: '-10'
 • Image 10 onwards to the end of the file: '10-'
 • Images 3, 6, and 10 to 15: '3, 6, 10-15'
-• Leave empty to process ALL items in the folder.</span>
-        <div id="err-IMAGE_RANGE" class="error-text"></div>
+• Leave empty to process ALL frames contained in a multi-image file.</span>
+        <div id="err-IMAGE_RANGE" class="error-text" data-field-error></div>
     </div>
 
 </form>

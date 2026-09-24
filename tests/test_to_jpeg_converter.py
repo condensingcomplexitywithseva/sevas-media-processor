@@ -160,6 +160,173 @@ def test_downscale_note_reports_display_size_not_stored_size(tmp_path):
 
 
 
+def anamorphic_tiff(width=400, height=200, dpi=(204, 98), mode="RGB"):
+    color = (30, 30, 30) if mode == "RGB" else (30, 30, 30, 128)
+    buf = io.BytesIO()
+    Image.new(mode, (width, height), color).save(buf, "TIFF", dpi=dpi)
+    buf.seek(0)
+    return Image.open(buf)
+
+
+def test_unequal_density_stretches_the_squashed_axis_back(tmp_path):
+    out = tmp_path / "fax.jpg"
+
+    status, comment = make_converter().process_image(anamorphic_tiff(), out)
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (400, 416)
+    assert ("Aspect corrected using 204x98 dpi metadata "
+            "(height stretched 2.08x)") in comment
+
+
+def test_lower_horizontal_density_stretches_width_instead(tmp_path):
+    out = tmp_path / "tall.jpg"
+
+    status, comment = make_converter().process_image(
+        anamorphic_tiff(dpi=(98, 204)), out
+    )
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (833, 200)
+    assert ("Aspect corrected using 98x204 dpi metadata "
+            "(width stretched 2.08x)") in comment
+
+
+def test_equal_density_is_left_alone_without_note(tmp_path):
+    out = tmp_path / "square_pixels.jpg"
+
+    status, comment = make_converter().process_image(
+        anamorphic_tiff(dpi=(200, 200)), out
+    )
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (400, 200)
+    assert "Aspect corrected" not in comment
+
+
+def test_absent_density_metadata_is_left_alone(tmp_path):
+    out = tmp_path / "no_metadata.jpg"
+
+    status, comment = make_converter().process_image(
+        Image.new("RGB", (400, 200), "green"), out
+    )
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (400, 200)
+    assert "Aspect corrected" not in comment
+
+
+def test_two_percent_tolerance_separates_noise_from_anamorphic(tmp_path):
+    out_noise = tmp_path / "noise.jpg"
+    status, comment = make_converter().process_image(
+        anamorphic_tiff(dpi=(300, 296)), out_noise
+    )
+    assert status == Status.OK.value
+    saved, _ = reload(out_noise)
+    assert saved.size == (400, 200)
+    assert "Aspect corrected" not in comment
+
+    out_real = tmp_path / "real.jpg"
+    status, comment = make_converter().process_image(
+        anamorphic_tiff(dpi=(300, 290)), out_real
+    )
+    assert status == Status.OK.value
+    saved, _ = reload(out_real)
+    assert saved.size == (400, 207)
+    assert "Aspect corrected" in comment
+
+
+def test_correction_precedes_the_downscale_and_both_notes_agree(tmp_path):
+    out = tmp_path / "fax_small.jpg"
+
+    status, comment = make_converter(max_dimension=300).process_image(
+        anamorphic_tiff(), out
+    )
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (288, 300)
+    assert ("Aspect corrected using 204x98 dpi metadata "
+            "(height stretched 2.08x)") in comment
+    assert "Downscaled from 400x416 to 288x300" in comment
+
+
+def test_tiff_aspect_only_resolution_unit_still_corrects(tmp_path):
+    buf = io.BytesIO()
+    Image.new("RGB", (400, 200), (30, 30, 30)).save(
+        buf, "TIFF", x_resolution=204, y_resolution=98, resolution_unit=1
+    )
+    buf.seek(0)
+    out = tmp_path / "unitless.jpg"
+
+    with Image.open(buf) as source:
+        assert "dpi" not in source.info
+        assert source.info.get("resolution") == (204, 98)
+        status, comment = make_converter().process_image(source, out)
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (400, 416)
+    assert "Aspect corrected" in comment
+
+
+def test_density_survives_the_transparency_flatten(tmp_path):
+    out = tmp_path / "transparent_fax.jpg"
+
+    status, comment = make_converter().process_image(
+        anamorphic_tiff(mode="RGBA"), out
+    )
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (400, 416)
+    assert "Aspect corrected" in comment
+
+
+def test_quarter_turn_orientation_swaps_the_density_axes(tmp_path):
+    base = Image.new("RGB", (400, 200), "blue")
+    exif = base.getexif()
+    exif[274] = 6
+    buf = io.BytesIO()
+    base.save(buf, "JPEG", exif=exif.tobytes(), dpi=(98, 204))
+    buf.seek(0)
+    out = tmp_path / "rotated_fax.jpg"
+
+    with Image.open(buf) as source:
+        status, comment = make_converter().process_image(source, out)
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (200, 833)
+    assert ("Aspect corrected using 204x98 dpi metadata "
+            "(height stretched 2.08x)") in comment
+
+
+def test_jfif_aspect_only_density_still_corrects(tmp_path):
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 150), (60, 60, 60)).save(buf, "JPEG")
+    data = bytearray(buf.getvalue())
+    assert data[13] == 0
+    data[14:18] = struct.pack(">HH", 2, 1)
+    out = tmp_path / "jfif_aspect.jpg"
+
+    with Image.open(io.BytesIO(bytes(data))) as source:
+        assert source.info.get("jfif_unit") == 0
+        assert "dpi" not in source.info
+        status, comment = make_converter().process_image(source, out)
+
+    assert status == Status.OK.value
+    saved, _ = reload(out)
+    assert saved.size == (300, 300)
+    assert ("Aspect corrected using 2x1 dpi metadata "
+            "(height stretched 2.00x)") in comment
+
+
+
 def test_size_budget_finds_lower_quality_and_says_so(tmp_path):
     out = tmp_path / "budget.jpg"
 
