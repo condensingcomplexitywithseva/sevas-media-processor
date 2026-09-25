@@ -14,13 +14,25 @@
 # 6. When the window asks for install.txt, drag install.txt from the
 #    extracted folder (sevas-media-processor-main) into the PowerShell
 #    window, then press Enter.
-# 7. If it installs Python: close the PowerShell window, open Windows
-#    PowerShell again the same way, paste the text again and press Enter.
 #
 # If you run into problems, open README.md in this folder.
 
 & {
 $ErrorActionPreference = "Stop"
+
+if (-not [Console]::IsOutputRedirected) {
+    try { Clear-Host } catch { }
+}
+
+function Show-Box {
+    param([string[]]$Lines, [string]$Color = "Yellow")
+    $width = ($Lines | Measure-Object -Property Length -Maximum).Maximum + 4
+    Write-Host ""
+    Write-Host ("#" * $width) -ForegroundColor $Color
+    foreach ($line in $Lines) { Write-Host ("# " + $line.PadRight($width - 4) + " #") -ForegroundColor $Color }
+    Write-Host ("#" * $width) -ForegroundColor $Color
+    Write-Host ""
+}
 
 function Test-AppFolder {
     param([string]$Folder)
@@ -32,11 +44,15 @@ if (-not (Test-AppFolder $InstallDir)) {
     $InstallDir = [Environment]::CurrentDirectory
 }
 while (-not (Test-AppFolder $InstallDir)) {
-    Write-Host "Drag install.txt from the extracted folder (sevas-media-processor-main) into this window, then press Enter." -ForegroundColor Cyan
+    Show-Box @("ACTION NEEDED",
+               "",
+               "Drag install.txt from the extracted folder",
+               "(sevas-media-processor-main) into this window,",
+               "then press Enter.")
     $answer = Read-Host "install.txt"
     $dropped = "$answer".Trim().Trim('"').Trim("'")
     if (-not $dropped) {
-        Write-Host "Nothing was dragged in, so nothing was installed." -ForegroundColor Red
+        Show-Box @("Nothing was dragged in, so nothing was installed.") "Red"
         Read-Host "Press Enter to close this window"
         exit 1
     }
@@ -45,7 +61,8 @@ while (-not (Test-AppFolder $InstallDir)) {
     }
     $InstallDir = $dropped
     if (-not (Test-AppFolder $InstallDir)) {
-        Write-Host "That is not the install.txt from the extracted folder. Use the install.txt that sits next to README.md." -ForegroundColor Yellow
+        Show-Box @("That is not the install.txt from the extracted folder.",
+                   "Use the install.txt that sits next to README.md.") "Red"
     }
 }
 Write-Host "Installing into: $InstallDir"
@@ -121,9 +138,30 @@ try {
     winget install --id Python.Python.3.14 --silent --accept-source-agreements --accept-package-agreements
     Stop-OnFailure "installing Python with winget"
 
-    Write-Host "Python is installed. Close this window, open Windows PowerShell again from the Start menu, paste the text again and press Enter." -ForegroundColor Cyan
-    Read-Host "Press Enter to close this window"
-    exit
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    $pythonPath = $null
+    $candidates = @("$env:LOCALAPPDATA\Programs\Python\Python$RequiredMajor$RequiredMinor\python.exe",
+                    "$env:ProgramFiles\Python$RequiredMajor$RequiredMinor\python.exe")
+    $candidates += @(Get-Command python.exe -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ -notlike '*\WindowsApps\*' })
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            $versionString = & $candidate --version 2>&1
+            if ("$versionString" -match "^Python $RequiredMajor\.$RequiredMinor\.") {
+                $pythonPath = $candidate
+                break
+            }
+        }
+    }
+    if (-not $pythonPath) {
+        Show-Box @("ACTION NEEDED",
+                   "",
+                   "Python is installed, but this window cannot find it yet.",
+                   "Close this window, open Windows PowerShell again from",
+                   "the Start menu, paste the text again and press Enter.")
+        Read-Host "Press Enter to close this window"
+        exit
+    }
+    Write-Host "Python installed: $versionString at $pythonPath. Continuing." -ForegroundColor Green
 }
 
 Write-Host "2/5 Creating/Verifying isolated Virtual Environment..."
@@ -173,8 +211,11 @@ $Shortcut.WindowStyle = 1
 $Shortcut.IconLocation = "$InstallDir\src\static\app_icon.ico,0"
 $Shortcut.Save()
 
-Write-Host ("=" * 30)
-Write-Host "INSTALLATION COMPLETE!"
-Write-Host "Launch the app using the 'Seva's Media Processor' shortcut on your Desktop."
-Read-Host "Press Enter to close this window"
+Write-Host ""
+Write-Host "##########################################################################" -ForegroundColor Green
+Write-Host "# INSTALLATION COMPLETE!                                                 #" -ForegroundColor Green
+Write-Host "#                                                                        #" -ForegroundColor Green
+Write-Host "# Launch the app using the 'Seva's Media Processor' shortcut on your     #" -ForegroundColor Green
+Write-Host "# Desktop. You can close this window now.                                #" -ForegroundColor Green
+Write-Host "##########################################################################" -ForegroundColor Green
 }

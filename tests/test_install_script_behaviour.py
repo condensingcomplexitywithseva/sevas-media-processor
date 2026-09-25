@@ -174,6 +174,9 @@ def test_outside_the_extracted_folder_with_nothing_dragged_in_it_creates_nothing
     result = toolbox.run(folder, toolbox.root / "elsewhere_pip_calls.log")
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Drag install.txt from the extracted folder" in result.stdout
+    lines = result.stdout.splitlines()
+    heading = next(i for i, line in enumerate(lines) if line.startswith("# ACTION NEEDED"))
+    assert lines[heading - 1].strip("#") == "" and len(lines[heading - 1]) >= 20
     assert "Nothing was dragged in, so nothing was installed." in result.stdout
     assert "Installing into" not in result.stdout and "1/5" not in result.stdout
     assert sorted(p.name for p in folder.iterdir()) == ["install_steps_1_to_4.ps1"]
@@ -192,6 +195,43 @@ def test_dragging_install_txt_in_installs_into_its_folder(toolbox):
     assert (target / "input").is_dir() and (target / "settings.json").exists()
     assert sorted(p.name for p in started_in.iterdir()) == ["install_steps_1_to_4.ps1"]
     assert pip_calls(log) == ["install --upgrade pip", f"install -r {target}\\requirements.lock"]
+
+
+def test_a_computer_without_python_gets_it_from_winget_and_continues(toolbox, tmp_path):
+    major, minor = required_python()
+    folder = toolbox.app_folder("no python")
+    local = tmp_path / "localappdata"
+    target = local / "Programs" / "Python" / f"Python{major}{minor}"
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    winget_log = tmp_path / "winget_calls.log"
+    (fakebin / "winget.cmd").write_text(
+        "@echo off\r\n"
+        f'echo %*>>"{winget_log}"\r\n'
+        f'mkdir "{target.parent}" 2>nul\r\n'
+        f'mklink /J "{target}" "{Path(sys.base_prefix)}" >nul\r\n'
+        "exit /b 0\r\n",
+        encoding="utf-8",
+    )
+    windows = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"))
+    pip_log = tmp_path / "no_python_pip_calls.log"
+    env = {**toolbox.base_env, "FAKE_PIP_LOG": str(pip_log), "FAKE_PIP_EXIT": "0",
+           "LOCALAPPDATA": str(local),
+           "PATH": os.pathsep.join([str(fakebin), str(windows / "System32"), str(windows)])}
+    try:
+        result = run_powershell(folder / "install_steps_1_to_4.ps1", folder, env)
+    finally:
+        if target.exists():
+            os.rmdir(target)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Python not found. Attempting to install via winget" in result.stdout
+    assert winget_log.read_text(encoding="utf-8").startswith(
+        f"install --id Python.Python.{major}.{minor} --silent")
+    assert f"at {target}\\python.exe. Continuing." in result.stdout
+    assert "paste the text again" not in result.stdout
+    assert "Virtual environment created" in result.stdout
+    assert (folder / "venv" / "pyvenv.cfg").exists()
+    assert pip_calls(pip_log) == ["install --upgrade pip", f"install -r {folder}\\requirements.lock"]
 
 
 def test_a_venv_without_the_users_files_gets_the_first_run_files(toolbox):
@@ -233,6 +273,9 @@ def test_the_shortcut_step_writes_the_lnk_into_the_desktop_folder_windows_report
     result = run_powershell(script, folder, env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "INSTALLATION COMPLETE!" in result.stdout
+    assert "You can close this window now." in result.stdout
+    assert result.stdout.rstrip().endswith("#" * 20)
+    assert "Press Enter" not in result.stdout
     link = desktop / SHORTCUT_NAME
     assert link.exists()
 
@@ -351,6 +394,12 @@ def test_the_how_to_in_the_file_is_the_readmes_steps():
         "the file's own steps must not tell its reader to open it"
     )
     assert "# If you run into problems, open README.md in this folder." in script_text()
+
+
+def test_the_screen_is_cleared_only_in_a_real_window():
+    text = script_text().replace("\r\n", "\n")
+    assert text.count("Clear-Host") == 1
+    assert "if (-not [Console]::IsOutputRedirected) {\n    try { Clear-Host } catch { }\n}" in text
 
 
 def test_every_path_test_is_literal_and_no_profile_desktop_remains():

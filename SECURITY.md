@@ -127,7 +127,8 @@ The application writes only to its own folder, the folders you choose and
 above. The setup script — `install.txt`, which `README.md` tells you
 to paste into PowerShell — does more:
 
-- **If a suitable Python is missing** and you approve the prompt, it runs
+- **If no Python is found**, or an older one is found and you accept its
+  upgrade prompt, it runs
   `winget install --id Python.Python.3.14 --silent
   --accept-source-agreements --accept-package-agreements`: a network
   download of the official Python installer, its licence terms accepted,

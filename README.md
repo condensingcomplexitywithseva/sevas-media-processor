@@ -25,7 +25,7 @@ the installer does, are in SECURITY.md.)
 
 ## Work in progress
 
-Current version: v0.3.0
+Current version: v0.3.1
 
 This is a 0.x application under active development. Interfaces, settings,
 and outputs may change between versions. Feedback is welcome; no support
@@ -93,13 +93,12 @@ The setup script is the file `install.txt` in the extracted folder
 8. When the window asks for `install.txt`, drag `install.txt` from the
    extracted folder (`sevas-media-processor-main`) into the PowerShell
    window, then press Enter.
-9. If it installs Python: close the PowerShell window, open Windows
-   PowerShell again the same way, paste the text again and press Enter.
 
 What the setup script does:
 
-1. Verifies Python; if a suitable one is missing and you approve its prompt,
-   installs Python 3.14 for your user account using winget.
+1. Verifies Python. If there is none, it installs Python 3.14 for your user
+   account using winget and carries on; if it finds an older or newer
+   Python, it asks you first.
 2. Creates a "venv" (Virtual Environment) folder, so the libraries install
    into it rather than into the machine's Python.
 3. Downloads the required third-party libraries into that virtual environment.
