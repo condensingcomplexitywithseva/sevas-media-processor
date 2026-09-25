@@ -15,8 +15,8 @@
         <label data-i18n="lbl_main_mode">Main Application Mode:</label>
         <div class="input-row">
             <select id="ENABLE_LLM_INFERENCE" name="ENABLE_LLM_INFERENCE">
-                <option value="false" {% if not settings.ENABLE_LLM_INFERENCE %}selected{% endif %} data-i18n="opt_jpeg">Turn media files to JPEGs</option>
-                <option value="true" {% if settings.ENABLE_LLM_INFERENCE %}selected{% endif %} data-i18n="opt_ai">Analyze files with AI</option>
+                <option value="false" {% if not settings.ENABLE_LLM_INFERENCE %}selected{% endif %} data-i18n="opt_jpeg">AI off: only convert files to JPEG</option>
+                <option value="true" {% if settings.ENABLE_LLM_INFERENCE %}selected{% endif %} data-i18n="opt_ai">AI on: convert and analyze files</option>
             </select>
             <button type="button" class="btn-default" onclick='resetDefaultByName("ENABLE_LLM_INFERENCE", {{ default_settings.ENABLE_LLM_INFERENCE | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
         </div>

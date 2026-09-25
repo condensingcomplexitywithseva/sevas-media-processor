@@ -216,8 +216,8 @@
     "run_status_failed": "Run failed — the process did not complete",
     "run_status_aborted": "Run stopped by user",
 
-    "opt_ai": "Analyze files with AI",
-    "opt_jpeg": "Turn media files to JPEGs",
+    "opt_ai": "AI on: convert and analyze files",
+    "opt_jpeg": "AI off: only convert files to JPEG",
     "opt_summary": "SUMMARY",
     "opt_sampling": "SAMPLING",
     "opt_text": "TEXT",

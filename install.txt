@@ -6,8 +6,8 @@
 # 2. Press the Windows key on your keyboard (it shows the Windows logo, four
 #    small squares, and sits in the bottom row between Ctrl and Alt), type
 #    PowerShell, and click "Windows PowerShell" in the results.
-# 3. Right-click anywhere inside the black/blue PowerShell window to paste
-#    the text.
+# 3. Click inside the black/blue PowerShell window, then press Ctrl+V to
+#    paste the text.
 # 4. If a warning says the text contains multiple lines or is very large,
 #    click "Paste anyway".
 # 5. Press Enter.

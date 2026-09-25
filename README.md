@@ -6,10 +6,14 @@ Ask an AI about your own photos, videos, PDFs and scans - and get the answers
 back as a spreadsheet.
 
 Point it at a folder and it does the rest. Every file is converted, read by
-the AI model you choose - including a free one running on your own computer -
-and the answers land in an Excel or CSV file you can sort and search.
-Receipts, invoices, screenshots, scanned paperwork, years of camera photos:
-ask once, get an answer for all of them.
+the AI model you choose, and the answers land in an Excel or CSV file you can
+sort and search. Receipts, invoices, screenshots, scanned paperwork, years of
+camera photos: ask once, get an answer for all of them.
+
+Use the AI that suits you: a popular provider such as Gemini, OpenAI
+(ChatGPT), Claude, DeepSeek, Mistral or Z.AI, or your company's own AI service
+through the "custom" provider. Or keep everything on your own computer with a
+free local model in Ollama or LM Studio.
 
 Not interested in AI? Switch it off and it is a bulk converter: iPhone HEICs,
 videos, GIFs and PDFs all become clean, uniform JPEGs.
@@ -25,7 +29,7 @@ the installer does, are in SECURITY.md.)
 
 ## Work in progress
 
-Current version: v0.3.1
+Current version: v0.3.2
 
 This is a 0.x application under active development. Interfaces, settings,
 and outputs may change between versions. Feedback is welcome; no support
@@ -85,8 +89,8 @@ The setup script is the file `install.txt` in the extracted folder
 4. Press the Windows key on your keyboard (it shows the Windows logo, four
    small squares, and sits in the bottom row between Ctrl and Alt), type
    `PowerShell`, and click "Windows PowerShell" in the results.
-5. Right-click anywhere inside the black/blue PowerShell window to paste
-   the text.
+5. Click inside the black/blue PowerShell window, then press Ctrl+V to
+   paste the text.
 6. If a warning says the text contains multiple lines or is very large,
    click "Paste anyway".
 7. Press Enter.
@@ -193,8 +197,8 @@ commands yourself.
 10. Press the Windows key on your keyboard (it shows the Windows logo, four
     small squares, and sits in the bottom row between Ctrl and Alt), type
     `PowerShell`, and click "Windows PowerShell" in the results.
-11. Right-click anywhere inside the black/blue PowerShell window to paste
-    the text.
+11. Click inside the black/blue PowerShell window, then press Ctrl+V to
+    paste the text.
 12. If a warning says the text contains multiple lines or is very large,
     click "Paste anyway".
 13. Press Enter.
