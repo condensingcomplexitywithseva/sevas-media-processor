@@ -85,6 +85,21 @@
             "reasoning_handling": "preserve",
             "response_extraction_path": "choices[0].message.content"
         },
+        "zai": {
+            "url": "https://api.z.ai/api/paas/v4/chat/completions",
+            "model": "GLM-4.6V-Flash",
+            "auth_header_key": "Authorization",
+            "auth_header_format": "Bearer {token}",
+            "extra_header_key": "",
+            "extra_header_value": "",
+            "require_max_tokens": false,
+            "max_tokens": 64000,
+            "max_tokens_field": "max_tokens",
+            "system_prompt_location": "messages",
+            "image_payload_style": "data_uri",
+            "reasoning_handling": "preserve",
+            "response_extraction_path": "choices[0].message.content"
+        },
         "ollama": {
             "url": "http://localhost:11434/v1/chat/completions",
             "model": "qwen3.5:0.8b",

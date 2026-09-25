@@ -428,7 +428,7 @@ def test_saving_preserves_non_selected_garbage_verbatim(mgr, tmp_path):
     from config_validator import settings_form_view
     view, _ = mgr.load_for_ui()
     assert set(settings_form_view(view)["LLM_PROVIDERS"]) == {
-        "openai", "claude", "gemini", "deepseek", "mistral", "ollama", "lm-studio", "custom",
+        "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio", "custom",
     }
 
 
@@ -570,7 +570,8 @@ PRESERVED_PROVIDER_ENTRIES = [
 
 
 @pytest.mark.parametrize("provider",
-                         ["openai", "claude", "gemini", "deepseek", "mistral", "ollama", "lm-studio", "custom"])
+                         ["openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio",
+                          "custom"])
 @pytest.mark.parametrize("ai_enabled", [False, True])
 @pytest.mark.parametrize("entry", PRESERVED_PROVIDER_ENTRIES)
 def test_inactive_provider_whole_entry_roundtrip(mgr, tmp_path, provider, ai_enabled, entry):

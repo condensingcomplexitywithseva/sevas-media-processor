@@ -13,6 +13,7 @@ _LAZY: dict[str, str] = {
     "mistral": "mistral:MistralServer",
     "ollama": "ollama:OllamaServer",
     "lm-studio": "lmstudio:LMStudioServer",
+    "zai": "zai:ZaiServer",
 }
 
 DEFAULT_PORTS: dict[str, int] = {
@@ -23,6 +24,7 @@ DEFAULT_PORTS: dict[str, int] = {
     "mistral": 8005,
     "ollama": 8006,
     "lm-studio": 8007,
+    "zai": 8008,
 }
 
 

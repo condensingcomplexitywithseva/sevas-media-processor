@@ -28,7 +28,7 @@ from test_results_report import (
 )
 
 STRICT_PRESETS = ["openai", "claude", "gemini", "deepseek", "mistral",
-                  "ollama", "lm-studio"]
+                  "zai", "ollama", "lm-studio"]
 LABEL = "Image %d of %d - page %d."
 
 

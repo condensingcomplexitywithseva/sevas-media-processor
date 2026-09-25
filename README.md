@@ -25,7 +25,7 @@ the installer does, are in SECURITY.md.)
 
 ## Work in progress
 
-Current version: v0.2.0
+Current version: v0.3.0
 
 This is a 0.x application under active development. Interfaces, settings,
 and outputs may change between versions. Feedback is welcome; no support
@@ -52,33 +52,51 @@ The application requires 64-bit Windows 10 or 11 (any modern computer).
 
 ### First: download and extract
 
-If you already have the application folder on your computer, skip to the
-setup options below.
+If you have already downloaded and extracted the app, skip to the setup
+options below.
 
 1. On this project's GitHub page, click the green "Code" button above the
    file list, then click "Download ZIP" in the menu that opens.
 2. Open your Downloads folder. Right-click the downloaded ZIP file and
    choose "Extract All...", then click "Extract".
-3. You now have the application folder (GitHub names it
-   `sevas-media-processor-main`). Move it to where you want to keep it -
-   for example, your Desktop. Everything below happens inside this folder.
+3. Windows opens the extracted `sevas-media-processor-main` folder. If all
+   it holds is another `sevas-media-processor-main` folder, open that one:
+   the right folder has `install.txt` and `README.md` in it. The steps
+   below call it the extracted folder (`sevas-media-processor-main`).
+4. Move the extracted folder (`sevas-media-processor-main`) to where you
+   want to keep it - for example, your Desktop.
 
 ### Then: choose a setup path
 
-You may choose one of the three setup paths below:
+You may choose one of the two setup paths below:
 
-- Option 1: Run the install script (recommended).
-- Option 2: Copy and paste the same script into a terminal.
-- Option 3: Manual setup, one command at a time.
+- Option 1: Copy and paste the setup script into PowerShell (recommended).
+- Option 2: Manual setup, one command at a time.
 
-### Option 1: Run the install script
+### Option 1: Copy and paste the setup script
 
-1. Open the application folder.
-2. Right-click `install.ps1` and choose "Run with PowerShell". (On Windows 11,
-   click "Show more options" to see it.)
-3. If it installs Python: close the window and start over from step 2.
+The setup script is the file `install.txt` in the extracted folder
+(`sevas-media-processor-main`). To run it:
 
-What the script does:
+1. Open the extracted folder (`sevas-media-processor-main`).
+2. Double-click `install.txt` to open it in Notepad. (Windows may show its
+   name as `install`.)
+3. Press Ctrl+A to select all of the text, then Ctrl+C to copy it.
+4. Press the Windows key on your keyboard (it shows the Windows logo, four
+   small squares, and sits in the bottom row between Ctrl and Alt), type
+   `PowerShell`, and click "Windows PowerShell" in the results.
+5. Right-click anywhere inside the black/blue PowerShell window to paste
+   the text.
+6. If a warning says the text contains multiple lines or is very large,
+   click "Paste anyway".
+7. Press Enter.
+8. When the window asks for `install.txt`, drag `install.txt` from the
+   extracted folder (`sevas-media-processor-main`) into the PowerShell
+   window, then press Enter.
+9. If it installs Python: close the PowerShell window, open Windows
+   PowerShell again the same way, paste the text again and press Enter.
+
+What the setup script does:
 
 1. Verifies Python; if a suitable one is missing and you approve its prompt,
    installs Python 3.14 for your user account using winget.
@@ -89,170 +107,28 @@ What the script does:
    (a copy of `settings.example.json`).
 5. Creates a Desktop shortcut.
 
-### Option 2: Copy and paste
-
-The same script, pasted into a terminal:
-
-1. Open the application folder.
-2. Hold down Shift on your keyboard and Right-Click any empty space inside the folder.
-3. Click "Open PowerShell window here" or "Open in Terminal".
-4. Copy the ENTIRE block of code below (starting from $ErrorActionPreference).
-5. Right-click anywhere inside the black/blue command window to paste the code.
-6. Press Enter.
-7. If it installs Python: close the terminal and start over from step 1.
-
-```powershell
-$ErrorActionPreference = "Stop"
-$InstallDir = $PWD
-$RequiredMajor = 3
-$RequiredMinor = 14
-$UseStrictRequirements = $true
-
-function Stop-OnFailure {
-    param([string]$Step)
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "FAILED: $Step (exit code $LASTEXITCODE). The steps after this one were not run." -ForegroundColor Red
-        Read-Host "Press Enter to close this window"
-        exit 1
-    }
-}
-
-Write-Host "1/5 Verifying Global Python Installation..."
-try {
-    $pythonPath = (Get-Command python.exe -ErrorAction Stop).Source
-    $versionString = & $pythonPath --version 2>&1
-    $versionParts = ($versionString -replace '[^\d.]', '').Split('.')
-    $major = [int]$versionParts[0]
-    $minor = [int]$versionParts[1]
-
-    if ($major -lt $RequiredMajor -or ($major -eq $RequiredMajor -and $minor -lt $RequiredMinor)) {
-        Write-Host "Found Python $versionString, but this application is tested with Python 3.14." -ForegroundColor Yellow
-        $upgradeChoice = Read-Host "Would you like to automatically upgrade to Python 3.14? (Y/N)"
-
-        if ($upgradeChoice -match '^[Yy]') {
-            throw "User approved upgrade"
-        } else {
-            Write-Host "Upgrade declined." -ForegroundColor Yellow
-            $proceedChoice = Read-Host "Would you like to proceed with your older version of Python AT YOUR OWN RISK? (Y/N)"
-
-            if ($proceedChoice -match '^[Yy]') {
-                Write-Host "Proceeding with Python $versionString at your own risk." -ForegroundColor Magenta
-                Write-Host "Note: We will not install the exact versions of the dependencies to try to make it work on your older setup. Errors may still occur." -ForegroundColor Magenta
-                $UseStrictRequirements = $false
-            } else {
-                Write-Host "Setup cancelled. Cannot proceed without a compatible Python version." -ForegroundColor Red
-                exit 1
-            }
-        }
-    } elseif ($major -gt $RequiredMajor -or $minor -gt $RequiredMinor) {
-        Write-Host "Found Python $versionString, which is newer than Python $RequiredMajor.$RequiredMinor - the version this application is tested with." -ForegroundColor Yellow
-        $proceedChoice = Read-Host "Would you like to proceed with your newer version of Python AT YOUR OWN RISK? (Y/N)"
-
-        if ($proceedChoice -match '^[Yy]') {
-            Write-Host "Proceeding with Python $versionString at your own risk." -ForegroundColor Magenta
-            Write-Host "Note: We will not install the exact tested versions of the dependencies, because builds for your newer Python may not exist yet. Errors may still occur." -ForegroundColor Magenta
-            $UseStrictRequirements = $false
-        } else {
-            Write-Host "Setup cancelled. This version of the application is tested with Python $RequiredMajor.$RequiredMinor." -ForegroundColor Red
-            exit 1
-        }
-    } else {
-        Write-Host "Found Python $versionString. (Requirements met)." -ForegroundColor Green
-    }
-} catch {
-    if ($_.Exception.Message -match "User approved upgrade") {
-        Write-Host "Attempting to install via winget..." -ForegroundColor Yellow
-    } else {
-        Write-Host "Python not found. Attempting to install via winget..." -ForegroundColor Yellow
-    }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host "winget is not available on this computer. Install Python 3.14 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' during the installation), then run this script again." -ForegroundColor Red
-        Read-Host "Press Enter to close this window"
-        exit 1
-    }
-    winget install --id Python.Python.3.14 --silent --accept-source-agreements --accept-package-agreements
-    Stop-OnFailure "installing Python with winget"
-
-    Write-Host "Please restart this terminal window to complete the Python path registration." -ForegroundColor Cyan
-    Read-Host "Press Enter to exit and then re-open this folder..."
-    exit
-}
-
-Write-Host "2/5 Creating/Verifying isolated Virtual Environment..."
-if (!(Test-Path -LiteralPath "$InstallDir\venv")) {
-    & $pythonPath -m venv "$InstallDir\venv"
-    Stop-OnFailure "creating the virtual environment"
-    Write-Host "Virtual environment created." -ForegroundColor Green
-} else {
-    Write-Host "Virtual environment already exists. Skipping creation." -ForegroundColor Cyan
-}
-
-$venvPython = "$InstallDir\venv\Scripts\python.exe"
-$venvPythonw = "$InstallDir\venv\Scripts\pythonw.exe"
-
-Write-Host "3/5 Installing media libraries into the virtual environment (This takes a moment)..."
-& $venvPython -m pip install --upgrade pip | Out-Null
-Stop-OnFailure "upgrading pip"
-
-if ($UseStrictRequirements) {
-    & $venvPython -m pip install -r "$InstallDir\requirements.lock"
-    Stop-OnFailure "installing the libraries"
-} else {
-    & $venvPython -m pip install -r "$InstallDir\requirements_no_version.txt"
-    Stop-OnFailure "installing the libraries"
-}
-
-Write-Host "4/5 Preparing first-run files..."
-foreach ($dir in @("input", "output")) {
-    if (!(Test-Path -LiteralPath "$InstallDir\$dir")) {
-        [System.IO.Directory]::CreateDirectory("$InstallDir\$dir") | Out-Null
-        Write-Host "Created empty '$dir' folder." -ForegroundColor Green
-    }
-}
-if (!(Test-Path -LiteralPath "$InstallDir\settings.json")) {
-    [System.IO.File]::Copy("$InstallDir\settings.example.json", "$InstallDir\settings.json")
-    Write-Host "Created settings.json from the settings.example.json template." -ForegroundColor Green
-}
-
-Write-Host "5/5 Creating your Desktop Shortcut..."
-$DesktopDir = [Environment]::GetFolderPath('Desktop')
-$WshShell = New-Object -comObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$DesktopDir\Seva's Media Processor.lnk")
-$Shortcut.TargetPath = $venvPythonw
-$Shortcut.Arguments = ".\src\main.py"
-$Shortcut.WorkingDirectory = $InstallDir
-$Shortcut.WindowStyle = 1
-$Shortcut.IconLocation = "$InstallDir\src\static\app_icon.ico,0"
-$Shortcut.Save()
-
-Write-Host ("=" * 30)
-Write-Host "INSTALLATION COMPLETE!"
-Write-Host "Launch the app using the 'Seva's Media Processor' shortcut on your Desktop."
-Read-Host "Press Enter to close this window"
-```
-
-### Option 3: Manual Setup
+### Option 2: Manual Setup
 
 1. Download and install Python 3.14 from: https://www.python.org/downloads/
    If you already have Python 3.14, you can skip this step. Newer versions are untested.
    CRITICAL: During installation, you MUST check the box at the bottom that says "Add python.exe to PATH".
-2. Open the application folder.
+2. Open the extracted folder (`sevas-media-processor-main`).
 3. Hold down Shift on your keyboard and Right-Click any empty space inside the folder.
 4. Click "Open PowerShell window here" or "Open in Terminal".
 5. Type this and press Enter to create a virtual environment: `python -m venv venv`
 6. Type one of these two lines and press Enter to install the dependencies.
    With Python 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
    With any other Python version: `.\venv\Scripts\python.exe -m pip install -r requirements_no_version.txt`
-7. Create two folders named `input` and `output` inside the application folder
+7. Create two folders named `input` and `output` inside the extracted folder
    (Right-click > New > Folder). Files you put in `input` are what the application processes;
    the results land in `output`.
-8. Right-click in the application folder, select New > Shortcut.
+8. Right-click in the extracted folder, select New > Shortcut.
 9. Set the location to exactly this: `%windir%\System32\cmd.exe /c "start venv\Scripts\pythonw.exe src\main.py"`
 10. Name it "Seva's Media Processor", and click Finish.
 11. Right-click the new shortcut and select Properties. In the "Start in" box, put the
-    application folder's full path (copy it from the folder window's address bar).
+    extracted folder's full path (copy it from the folder window's address bar).
     Then, to give the shortcut its proper icon: click "Change Icon...", then "Browse...",
-    and pick this file inside the application folder: `src\static\app_icon.ico`
+    and pick this file inside the extracted folder: `src\static\app_icon.ico`
     Click OK twice to confirm.
 12. To launch the application, simply double-click the newly created "Seva's Media Processor" shortcut.
 
@@ -289,48 +165,64 @@ shown at the bottom of the application's sidebar with the
 "Current version" line near the top of this page. If they differ, a
 newer version exists.
 
-Two lists follow. Use the first one if you installed by running the
-install script or by pasting it into a terminal. Use the second one if
-you installed by typing the commands yourself.
+Two lists follow. Use the first one if you installed with a setup or
+install script. Use the second one if you installed by typing the
+commands yourself.
 
-### Update with the install script
+### Update with the setup script
 
-1. Rename your current application folder by adding `-old` to the end
-   of its name.
+1. Rename the extracted folder you use now (usually
+   `sevas-media-processor-main`) by adding `-old` to the end of its name.
 2. On this project's GitHub page, click the green "Code" button above
    the file list, then click "Download ZIP" in the menu that opens.
 3. Open your Downloads folder. Right-click the downloaded ZIP file and
    choose "Extract All...", then click "Extract".
-4. Move the extracted `sevas-media-processor-main` folder to where the
-   old folder is.
+4. Windows opens the extracted `sevas-media-processor-main` folder. If all
+   it holds is another `sevas-media-processor-main` folder, use that one:
+   the right folder has `install.txt` and `README.md` in it. Move it to
+   where the old folder is.
 5. Rename the new folder to the old folder's name without the `-old`.
    For example, if the old folder is now `sevas-media-processor-main-old`,
    name the new folder `sevas-media-processor-main`; if it is now
    `my_app-old`, name the new folder `my_app`.
 6. Move `settings.json`, the `input` folder and the `output` folder
    from the old folder into the new folder.
-7. In the new folder, right-click `install.ps1` and choose "Run with
-   PowerShell". (On Windows 11, click "Show more options" to see it.)
-8. Launch the application from the Desktop shortcut. Once it works,
-   delete the old folder.
+7. Open the new folder (usually `sevas-media-processor-main`).
+8. Double-click `install.txt` to open it in Notepad. (Windows may show its
+   name as `install`.)
+9. Press Ctrl+A to select all of the text, then Ctrl+C to copy it.
+10. Press the Windows key on your keyboard (it shows the Windows logo, four
+    small squares, and sits in the bottom row between Ctrl and Alt), type
+    `PowerShell`, and click "Windows PowerShell" in the results.
+11. Right-click anywhere inside the black/blue PowerShell window to paste
+    the text.
+12. If a warning says the text contains multiple lines or is very large,
+    click "Paste anyway".
+13. Press Enter.
+14. When the window asks for `install.txt`, drag `install.txt` from the new
+    folder into the PowerShell window, then press Enter.
+15. Launch the application from the Desktop shortcut. Once it works,
+    delete the old folder.
 
 ### Update by hand
 
-1. Rename your current application folder by adding `-old` to the end
-   of its name.
+1. Rename the extracted folder you use now (usually
+   `sevas-media-processor-main`) by adding `-old` to the end of its name.
 2. On this project's GitHub page, click the green "Code" button above
    the file list, then click "Download ZIP" in the menu that opens.
 3. Open your Downloads folder. Right-click the downloaded ZIP file and
    choose "Extract All...", then click "Extract".
-4. Move the extracted `sevas-media-processor-main` folder to where the
-   old folder is.
+4. Windows opens the extracted `sevas-media-processor-main` folder. If all
+   it holds is another `sevas-media-processor-main` folder, use that one:
+   the right folder has `install.txt` and `README.md` in it. Move it to
+   where the old folder is.
 5. Rename the new folder to the old folder's name without the `-old`.
    For example, if the old folder is now `sevas-media-processor-main-old`,
    name the new folder `sevas-media-processor-main`; if it is now
    `my_app-old`, name the new folder `my_app`.
 6. Move `settings.json`, the `input` folder and the `output` folder
    from the old folder into the new folder.
-7. Open the new folder.
+7. Open the new folder (usually `sevas-media-processor-main`).
 8. Hold down Shift on your keyboard and Right-Click any empty space inside the folder.
 9. Click "Open PowerShell window here" or "Open in Terminal".
 10. Type this and press Enter to create a virtual environment: `python -m venv venv`
@@ -340,8 +232,8 @@ you installed by typing the commands yourself.
 12. Launch the application from the Desktop shortcut. Once it works,
     delete the old folder.
 
-If you cloned with git: `git pull`, delete the `venv` folder, then run
-`install.ps1` again.
+If you cloned with git: `git pull`, delete the `venv` folder, then paste
+`install.txt` into PowerShell opened in the cloned folder again.
 
 ## Your data and the network
 

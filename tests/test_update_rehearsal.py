@@ -24,7 +24,7 @@ from user_data import Bucket, SETTINGS_FILE_NAME, moved_by_user, user_paths
 
 from test_readme_step_lists import backticked, readme_slug, steps_under
 
-UPDATE_LIST = "Update with the install script"
+UPDATE_LIST = "Update with the setup script"
 EDITED_QUALITY = 77
 EARLIER_ARCHIVE = "old_current_run_2026-01-01_00-00-00"
 
@@ -90,23 +90,31 @@ def build_old_install(root, folder_name, app_data, monkeypatch):
 
 
 def build_new_version(root):
-    new = root / "downloads" / f"{readme_slug()}-main"
+    outer = root / "downloads" / f"{readme_slug()}-main"
+    new = outer / outer.name
     new.mkdir(parents=True)
-    for name in ("README.md", "install.ps1", "settings.example.json",
+    for name in ("README.md", "install.txt", "settings.example.json",
                  "requirements.lock", "requirements_no_version.txt"):
         shutil.copy2(REPO_ROOT / name, new / name)
     for entry in user_paths():
         assert not (new / entry.name).exists()
-    return new
+    return outer
 
 
 def follow_the_readme(old, new, steps, move_names):
-    assert steps[0].startswith("Rename your current application folder by adding `-old`")
+    assert steps[0].startswith("Rename the extracted folder you use now")
+    assert "by adding `-old` to the end of its name" in steps[0]
     renamed_old = old.with_name(old.name + "-old")
     old.rename(renamed_old)
-    assert steps[3].startswith("Move the extracted")
-    placed = old.parent / new.name
-    shutil.move(str(new), str(placed))
+    assert steps[3].startswith("Windows opens the extracted")
+    assert "If all it holds is another" in steps[3]
+    opened = new
+    inside = list(opened.iterdir())
+    if len(inside) == 1 and inside[0].is_dir() and inside[0].name == opened.name:
+        opened = inside[0]
+    assert (opened / "install.txt").is_file() and (opened / "README.md").is_file()
+    placed = old.parent / opened.name
+    shutil.move(str(opened), str(placed))
     assert steps[4].startswith("Rename the new folder to the old folder's name without the `-old`")
     final = old.parent / renamed_old.name.removesuffix("-old")
     placed.rename(final)

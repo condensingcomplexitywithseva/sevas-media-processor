@@ -733,7 +733,7 @@ def test_abort_toggle_halts_the_batch_with_outcomes_carried(
 
 
 @pytest.mark.parametrize("provider_name", [
-    "openai", "claude", "gemini", "deepseek", "mistral", "ollama", "lm-studio",
+    "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio",
 ])
 def test_corrective_retry_is_legal_on_every_shipped_preset(
         provider_name, make_jpegs):

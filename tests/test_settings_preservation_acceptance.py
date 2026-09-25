@@ -92,7 +92,7 @@ def test_every_dormant_field_survives_reads_and_repeated_edit_saves(isolated, fi
 
 
 @pytest.mark.parametrize("provider", [
-    "openai", "claude", "gemini", "deepseek", "mistral", "ollama", "lm-studio", "custom",
+    "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio", "custom",
 ])
 def test_selected_provider_typed_view_keeps_exact_opaque_siblings(isolated, provider):
     manager, client, raw = isolated

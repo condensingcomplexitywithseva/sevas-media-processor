@@ -21,7 +21,7 @@ from user_data import Bucket, Site, moved_by_user, user_paths
 
 from test_readme_step_lists import backticked, steps_under
 
-INSTALL_SCRIPT = REPO_ROOT / "install.ps1"
+INSTALL_SCRIPT = REPO_ROOT / "install.txt"
 GITIGNORE = REPO_ROOT / ".gitignore"
 
 SCRIPT_FOLDERS = re.compile(r'foreach \(\$dir in @\(((?:"[^"]+"(?:,\s*)?)+)\)\)')
@@ -66,7 +66,7 @@ def test_the_runtime_spells_the_names_through_the_registry(tmp_path):
 
 
 def test_the_readme_moves_exactly_the_moved_bucket():
-    for heading in ("Update with the install script", "Update by hand"):
+    for heading in ("Update with the setup script", "Update by hand"):
         move_steps = [s for s in steps_under(heading) if s.startswith("Move `")]
         assert len(move_steps) == 1, (heading, move_steps)
         assert tuple(backticked(move_steps[0])) == moved_by_user(), (heading, move_steps[0])
@@ -81,10 +81,10 @@ def test_the_readme_names_the_rebuilt_folder_in_the_git_line():
 def test_the_installer_creates_exactly_the_moved_folders_and_the_settings_file():
     script = INSTALL_SCRIPT.read_text(encoding="utf-8")
     folders = SCRIPT_FOLDERS.search(script)
-    assert folders, "install.ps1 no longer creates its first-run folders in a foreach"
+    assert folders, "install.txt no longer creates its first-run folders in a foreach"
     created = [name.strip().strip('"') for name in folders.group(1).split(",")]
     settings_copy = SCRIPT_SETTINGS_COPY.search(script)
-    assert settings_copy, "install.ps1 no longer copies the settings template with a literal .NET copy"
+    assert settings_copy, "install.txt no longer copies the settings template with a literal .NET copy"
     assert [*created, settings_copy.group(1)] == [
         user_data.DEFAULT_INPUT_FOLDER, user_data.DEFAULT_OUTPUT_FOLDER,
         user_data.SETTINGS_FILE_NAME,

@@ -32,7 +32,7 @@ av = pytest.importorskip("av")
 np = pytest.importorskip("numpy")
 
 DIALECT_PRESETS = ["openai", "claude", "gemini", "deepseek", "mistral",
-                   "ollama", "lm-studio"]
+                   "zai", "ollama", "lm-studio"]
 HMS = re.compile(r"^\d{2,}:\d{2}:\d{2}\.\d{2}$")
 
 

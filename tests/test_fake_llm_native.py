@@ -55,6 +55,8 @@ _HAPPY = {
                  {"model": "qwen3.5:0.8b", "messages": [{"role": "user", "content": "hi"}]}),
     "lm-studio": ("/v1/chat/completions", {},
                   {"model": "qwen/qwen3.5-2b", "messages": [{"role": "user", "content": "hi"}]}),
+    "zai":      ("/api/paas/v4/chat/completions", {"Authorization": "Bearer anykey"},
+                 {"model": "GLM-4.6V-Flash", "messages": [{"role": "user", "content": "hi"}]}),
 }
 
 
@@ -533,6 +535,57 @@ class TestLMStudio:
         r = _post(server.base_url + "/v1/chat/completions",
                           json={"model": "no-such-model", "messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 404
+
+
+
+@pytest.mark.parametrize("server", ["zai"], indirect=True)
+class TestZai:
+    URL = "/api/paas/v4/chat/completions"
+    GOOD: ClassVar[dict] = {"Authorization": "Bearer anyopaquekey"}
+    BODY: ClassVar[dict] = {"model": "glm-4.6v-flash", "messages": [{"role": "user", "content": "hi"}]}
+
+    def post(self, server, body=None, headers=None):
+        return _post(server.base_url + self.URL,
+                     headers=self.GOOD if headers is None else headers,
+                     json=self.BODY if body is None else body)
+
+    def test_happy_openai_shape_with_request_id(self, server):
+        j = self.post(server).json()
+        assert j["choices"][0]["message"]["content"]
+        assert j["request_id"] and "reasoning_content" not in j["choices"][0]["message"]
+
+    def test_model_names_match_case_insensitively(self, server):
+        assert self.post(server, body=dict(self.BODY, model="GLM-4.6V-Flash")).status_code == 200
+
+    def test_missing_auth_401_code_1001(self, server):
+        r = self.post(server, headers={})
+        assert r.status_code == 401 and r.json()["error"]["code"] == "1001"
+
+    def test_unknown_model_400_code_1211(self, server):
+        r = self.post(server, body=dict(self.BODY, model="gpt-4o"))
+        assert r.status_code == 400 and r.json()["error"]["code"] == "1211"
+
+    def test_missing_messages_400_code_1213(self, server):
+        r = self.post(server, body={"model": "glm-4.6v-flash"})
+        assert r.status_code == 400 and r.json()["error"]["code"] == "1213"
+
+    @pytest.mark.parametrize("value", [0, 131073, "100", True])
+    def test_max_tokens_outside_the_range_400_code_1214(self, server, value):
+        r = self.post(server, body=dict(self.BODY, max_tokens=value))
+        assert r.status_code == 400 and r.json()["error"]["code"] == "1214"
+
+    @pytest.mark.parametrize("value", [1, 64000, 131072])
+    def test_max_tokens_inside_the_range_is_accepted(self, server, value):
+        assert self.post(server, body=dict(self.BODY, max_tokens=value)).status_code == 200
+
+    def test_thinking_enabled_adds_reasoning_content(self, server):
+        body = dict(self.BODY, thinking={"type": "enabled"})
+        message = self.post(server, body=body).json()["choices"][0]["message"]
+        assert message["reasoning_content"] and isinstance(message["content"], str)
+
+    def test_streaming_sse_terminates_with_done(self, server):
+        r = self.post(server, body=dict(self.BODY, stream=True))
+        assert "chat.completion.chunk" in r.text and r.text.strip().endswith("[DONE]")
 
 
 

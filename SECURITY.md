@@ -124,8 +124,8 @@ Pillow (libjpeg, libtiff, libwebp, zlib), `av` (all of FFmpeg),
 
 The application writes only to its own folder, the folders you choose and
 `%APPDATA%\SevasMediaProcessor`, apart from the startup crash log described
-above. The setup script — `install.ps1`, also printed in `README.md` as the
-paste-in block — does more:
+above. The setup script — `install.txt`, which `README.md` tells you
+to paste into PowerShell — does more:
 
 - **If a suitable Python is missing** and you approve the prompt, it runs
   `winget install --id Python.Python.3.14 --silent

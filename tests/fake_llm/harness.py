@@ -25,6 +25,7 @@ KEY_SHAPED_TOKENS: dict[str, str | None] = {
     "gemini": "AIzaFAKE0123456789abcdefghijklmnopqrst",
     "deepseek": "sk-fake0123456789abcdef0123456789",
     "mistral": "fake-mistral-token-not-a-real-key",
+    "zai": "fake-zai-token-not-a-real-key",
     "ollama": None,
     "lm-studio": None,
 }

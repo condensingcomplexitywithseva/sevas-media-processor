@@ -50,7 +50,7 @@ def user_paths() -> tuple[UserPath, ...]:
                  "every run's JPEGs, reports, database and archived run folders "
                  "(default location; OUTPUT_FOLDER_PATH may point elsewhere)"),
         UserPath(VENV_DIR_NAME, Site.APP_FOLDER, Bucket.REBUILT_BY_INSTALLER,
-                 "the Python libraries; install.ps1 builds a fresh one"),
+                 "the Python libraries; the setup script builds a fresh one"),
         UserPath(ENV_FILE_NAME, Site.APP_DATA, Bucket.OUTSIDE_FOLDER,
                  "the API tokens"),
         UserPath(LOGS_DIR_NAME, Site.APP_DATA, Bucket.OUTSIDE_FOLDER,

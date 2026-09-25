@@ -37,7 +37,7 @@ from test_llm_json_ladder import (
 from fake_llm.generic import GenericServer
 
 DIALECT_PRESETS = ["openai", "claude", "gemini", "deepseek", "mistral",
-                   "ollama", "lm-studio"]
+                   "zai", "ollama", "lm-studio"]
 
 
 

@@ -20,6 +20,14 @@ BROKEN_THREE = {
 }
 
 
+SUPPORTED_FRAMES = {f"provider-{name}" for name in (
+    "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio", "custom")}
+
+
+def frame_ids(page):
+    return set(page.eval_on_selector_all('.provider-frame', 'frames => frames.map(f => f.id)'))
+
+
 def open_ai_tab(page):
     page.click('[data-tab="ai"]')
     page.wait_for_timeout(400)
@@ -344,7 +352,7 @@ def test_unrelated_apply_preserves_complete_inactive_data(open_page, tmp_path, e
                                       {"newprovider": {"url": "http://localhost", "model": "future"}}])
 def test_dormant_provider_shapes_render_and_survive_apply(open_page, tmp_path, providers):
     page = open_page({"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDERS": providers})
-    assert page.locator('.provider-frame').count() == 8
+    assert frame_ids(page) == SUPPORTED_FRAMES
     saved = apply_quality(page, tmp_path)
     assert saved["LLM_PROVIDERS"] == providers
 
@@ -430,7 +438,7 @@ def test_unknown_provider_is_visible_and_can_be_repaired(open_page, tmp_path, lo
     page.evaluate('(locale) => changeLanguage(locale)', locale)
     open_ai_tab(page)
     assert page.locator('#LLM_PROVIDER').input_value() == 'future-provider'
-    assert page.locator('.provider-frame').count() == 8
+    assert frame_ids(page) == SUPPORTED_FRAMES
     assert not page.evaluate('window.hasUnsavedEdits()')
     page.locator('#LLM_PROVIDER').scroll_into_view_if_needed()
     page.screenshot(path=str(tmp_path / f'provider-dormant-{locale}.png'))

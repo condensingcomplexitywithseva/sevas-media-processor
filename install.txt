@@ -1,8 +1,55 @@
 # Copyright 2026 Vsevolod Belonogov
 # SPDX-License-Identifier: Apache-2.0
+#
+# How to install Seva's Media Processor with this file:
+# 1. Press Ctrl+A to select all of the text, then Ctrl+C to copy it.
+# 2. Press the Windows key on your keyboard (it shows the Windows logo, four
+#    small squares, and sits in the bottom row between Ctrl and Alt), type
+#    PowerShell, and click "Windows PowerShell" in the results.
+# 3. Right-click anywhere inside the black/blue PowerShell window to paste
+#    the text.
+# 4. If a warning says the text contains multiple lines or is very large,
+#    click "Paste anyway".
+# 5. Press Enter.
+# 6. When the window asks for install.txt, drag install.txt from the
+#    extracted folder (sevas-media-processor-main) into the PowerShell
+#    window, then press Enter.
+# 7. If it installs Python: close the PowerShell window, open Windows
+#    PowerShell again the same way, paste the text again and press Enter.
+#
+# If you run into problems, open README.md in this folder.
 
+& {
 $ErrorActionPreference = "Stop"
-$InstallDir = $PSScriptRoot
+
+function Test-AppFolder {
+    param([string]$Folder)
+    return (Test-Path -LiteralPath "$Folder\install.txt") -and (Test-Path -LiteralPath "$Folder\src\main.py")
+}
+
+$InstallDir = "$PWD"
+if (-not (Test-AppFolder $InstallDir)) {
+    $InstallDir = [Environment]::CurrentDirectory
+}
+while (-not (Test-AppFolder $InstallDir)) {
+    Write-Host "Drag install.txt from the extracted folder (sevas-media-processor-main) into this window, then press Enter." -ForegroundColor Cyan
+    $answer = Read-Host "install.txt"
+    $dropped = "$answer".Trim().Trim('"').Trim("'")
+    if (-not $dropped) {
+        Write-Host "Nothing was dragged in, so nothing was installed." -ForegroundColor Red
+        Read-Host "Press Enter to close this window"
+        exit 1
+    }
+    if (Test-Path -LiteralPath $dropped -PathType Leaf) {
+        $dropped = [System.IO.Path]::GetDirectoryName($dropped)
+    }
+    $InstallDir = $dropped
+    if (-not (Test-AppFolder $InstallDir)) {
+        Write-Host "That is not the install.txt from the extracted folder. Use the install.txt that sits next to README.md." -ForegroundColor Yellow
+    }
+}
+Write-Host "Installing into: $InstallDir"
+
 $RequiredMajor = 3
 $RequiredMinor = 14
 $UseStrictRequirements = $true
@@ -40,6 +87,7 @@ try {
                 $UseStrictRequirements = $false
             } else {
                 Write-Host "Setup cancelled. Cannot proceed without a compatible Python version." -ForegroundColor Red
+                Read-Host "Press Enter to close this window"
                 exit 1
             }
         }
@@ -53,6 +101,7 @@ try {
             $UseStrictRequirements = $false
         } else {
             Write-Host "Setup cancelled. This version of the application is tested with Python $RequiredMajor.$RequiredMinor." -ForegroundColor Red
+            Read-Host "Press Enter to close this window"
             exit 1
         }
     } else {
@@ -65,15 +114,15 @@ try {
         Write-Host "Python not found. Attempting to install via winget..." -ForegroundColor Yellow
     }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host "winget is not available on this computer. Install Python 3.14 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' during the installation), then run this script again." -ForegroundColor Red
+        Write-Host "winget is not available on this computer. Install Python 3.14 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' during the installation), then open Windows PowerShell again and paste the text again." -ForegroundColor Red
         Read-Host "Press Enter to close this window"
         exit 1
     }
     winget install --id Python.Python.3.14 --silent --accept-source-agreements --accept-package-agreements
     Stop-OnFailure "installing Python with winget"
 
-    Write-Host "Please restart this terminal window to complete the Python path registration." -ForegroundColor Cyan
-    Read-Host "Press Enter to exit and then re-open this folder..."
+    Write-Host "Python is installed. Close this window, open Windows PowerShell again from the Start menu, paste the text again and press Enter." -ForegroundColor Cyan
+    Read-Host "Press Enter to close this window"
     exit
 }
 
@@ -128,3 +177,4 @@ Write-Host ("=" * 30)
 Write-Host "INSTALLATION COMPLETE!"
 Write-Host "Launch the app using the 'Seva's Media Processor' shortcut on your Desktop."
 Read-Host "Press Enter to close this window"
+}

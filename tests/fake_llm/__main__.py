@@ -17,6 +17,7 @@ _PRIMARY_PATH = {
     "mistral": "/v1/chat/completions",
     "ollama": "/v1/chat/completions",
     "lm-studio": "/v1/chat/completions",
+    "zai": "/api/paas/v4/chat/completions",
 }
 
 

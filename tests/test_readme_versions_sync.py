@@ -12,7 +12,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 README = REPO_ROOT / "README.md"
 REQUIREMENTS = REPO_ROOT / "requirements.txt"
-INSTALL_SCRIPT = REPO_ROOT / "install.ps1"
+INSTALL_SCRIPT = REPO_ROOT / "install.txt"
 VERSION_SOURCE = REPO_ROOT / "src" / "version.py"
 
 README_APP_VERSION = re.compile(r"^Current version: (v\d+(?:\.\d+)+)\s*$", re.M)
@@ -147,7 +147,7 @@ def required_python_from_install_script():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     major = re.search(r"^\$RequiredMajor\s*=\s*(\d+)", text, re.M)
     minor = re.search(r"^\$RequiredMinor\s*=\s*(\d+)", text, re.M)
-    assert major and minor, "install.ps1 no longer declares RequiredMajor/RequiredMinor"
+    assert major and minor, "install.txt no longer declares RequiredMajor/RequiredMinor"
     return int(major.group(1)), int(minor.group(1))
 
 
@@ -156,12 +156,13 @@ def test_readme_and_install_script_agree_on_the_python_version():
     expected = f"{major}.{minor}"
     text = README.read_text(encoding="utf-8")
     assert f"Python {expected}" in text, (
-        f"install.ps1 requires Python {expected}, and README.md never "
+        f"install.txt requires Python {expected}, and README.md never "
         f"mentions 'Python {expected}'. The two must name the same version - "
         "a reader installs from the README and the script enforces the gate."
     )
-    assert f"Python.Python.{expected}" in text, (
-        f"README.md's winget command does not install Python.Python.{expected}"
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert f"winget install --id Python.Python.{expected} " in script, (
+        f"install.txt's winget command does not install Python.Python.{expected}"
     )
 
 
@@ -180,7 +181,7 @@ def test_the_version_parser_actually_parses():
 def test_the_suite_runs_on_the_interpreter_the_installer_would_use():
     exe = shutil.which("python.exe") or shutil.which("python")
     if exe is None:
-        pytest.skip("no python on PATH - install.ps1 could not run here either")
+        pytest.skip("no python on PATH - install.txt could not run here either")
     output = subprocess.run(
         [exe, "--version"], capture_output=True, text=True, check=True
     )
@@ -188,7 +189,7 @@ def test_the_suite_runs_on_the_interpreter_the_installer_would_use():
     running = sys.version_info[:3]
     assert running == installer_version, (
         f"this suite runs on Python {'.'.join(map(str, running))}, but the "
-        f"python.exe install.ps1 would use ({exe}) is "
+        f"python.exe install.txt would use ({exe}) is "
         f"{'.'.join(map(str, installer_version))}. Two interpreters have "
         "diverged on this machine: rebuild the venv from the installer's "
         "interpreter (or retire the stale install) so the tested "
@@ -201,5 +202,5 @@ def test_the_running_interpreter_satisfies_the_documented_minimum():
     running = sys.version_info[:2]
     assert running >= required, (
         f"running Python {running[0]}.{running[1]} but README.md and "
-        f"install.ps1 require {required[0]}.{required[1]} or newer"
+        f"install.txt require {required[0]}.{required[1]} or newer"
     )

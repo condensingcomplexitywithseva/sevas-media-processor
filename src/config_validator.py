@@ -130,6 +130,11 @@ def _default_provider_configs() -> dict[str, ProviderConfig]:
             model="mistral-medium-latest",
             reasoning_handling="preserve"
         ),
+        "zai": ProviderConfig(
+            url="https://api.z.ai/api/paas/v4/chat/completions",
+            model="GLM-4.6V-Flash",
+            reasoning_handling="preserve"
+        ),
         "ollama": ProviderConfig(
             url="http://localhost:11434/v1/chat/completions",
             model="qwen3.5:0.8b",
@@ -188,7 +193,7 @@ class Settings(BaseModel):
 
     ENABLE_LLM_INFERENCE: bool = Field(default=False, json_schema_extra={'tab': 'general'})
     LLM_PROVIDER: str = Field(default="gemini",
-                              pattern="^(openai|claude|gemini|deepseek|mistral|ollama|lm-studio|custom)$",
+                              pattern="^(openai|claude|gemini|deepseek|mistral|zai|ollama|lm-studio|custom)$",
                               json_schema_extra={'tab': 'ai'})
 
     LLM_PROVIDERS: dict[str, Any] = Field(

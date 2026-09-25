@@ -10,7 +10,7 @@ SPDX = "SPDX-License-Identifier: Apache-2.0"
 
 HEADERS = {
     ".py": (f"# {COPYRIGHT}", f"# {SPDX}"),
-    ".ps1": (f"# {COPYRIGHT}", f"# {SPDX}"),
+    ".txt": (f"# {COPYRIGHT}", f"# {SPDX}"),
     ".js": (f"/* {COPYRIGHT} */", f"/* {SPDX} */"),
 }
 
@@ -24,7 +24,7 @@ def _iter_files():
                 yield path
     yield REPO / "src" / "static" / "app.js"
     yield REPO / "src" / "static" / "i18n.js"
-    yield REPO / "install.ps1"
+    yield REPO / "install.txt"
 
 
 def _missing_header(path):
@@ -45,7 +45,7 @@ def test_positive_control_the_check_still_bites(tmp_path):
 def test_the_walk_sees_the_known_source_files():
     seen = {p.name for p in _iter_files()}
     for required in ("main.py", "conftest.py", "app.js", "i18n.js",
-                     "install.ps1", "test_legal_headers.py"):
+                     "install.txt", "test_legal_headers.py"):
         assert required in seen, f"the walk no longer reaches {required}"
 
 
