@@ -29,7 +29,7 @@ the installer does, are in SECURITY.md.)
 
 ## Work in progress
 
-Current version: v0.3.2
+Current version: v0.4.0
 
 This is a 0.x application under active development. Interfaces, settings,
 and outputs may change between versions. Feedback is welcome; no support

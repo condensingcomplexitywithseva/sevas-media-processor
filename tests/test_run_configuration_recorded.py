@@ -64,7 +64,7 @@ def test_a_columns_edit_after_the_run_changes_nothing_in_the_report(tmp_path):
     db_path = seed_answered_file(tmp_path / "state.db", {"answer": "a"})
     out = export_under_live_settings(db_path, tmp_path / "out", ("answer", "total"))
     headers, rows = read_csv_rows(out / f"{RESULTS_STEM}_t.csv")
-    assert headers == ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
+    assert headers == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_answer", "notes"]
     assert rows[0]["llm_answer"] == "a"
 
 
@@ -78,7 +78,8 @@ def test_ai_switched_off_after_the_run_still_exports_the_ai_report(tmp_path):
     workbook = workbook_in(out)
     assert "LLM Requests" in workbook.sheetnames and "LLM Answers" in workbook.sheetnames
     results_headers, _ = results_sheet(workbook)
-    assert results_headers == ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
+    assert results_headers == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result",
+                               "llm_answer", "notes"]
 
 
 def test_an_ai_run_that_reached_no_request_never_reads_as_ai_off(tmp_path):
@@ -100,7 +101,7 @@ def test_an_ai_run_that_reached_no_request_never_reads_as_ai_off(tmp_path):
     assert section(table, "requests") != {}, "an AI run has a requests section, zeros included"
     assert set(section(table, "requests").values()) == {0}
     headers, _ = results_sheet(workbook)
-    assert headers == ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
+    assert headers == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_answer", "notes"]
     assert limits_lines(table), "the limits block is present as on every run"
 
 

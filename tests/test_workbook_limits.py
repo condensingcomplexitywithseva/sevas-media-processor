@@ -187,8 +187,8 @@ def test_omitted_columns_are_named_and_distinct_from_omitted_rows(tmp_path, monk
     book = workbook_in(out)
     lines = limits_lines(summary_table(book))
     assert ["Excel sheet", "Omitted"] in sheet_rows(book, SUMMARY)
-    column = next(line for line in lines if line.startswith("Results: 2 columns omitted:"))
-    assert "llm_answer, notes (columns 5-6)" in column
+    column = next(line for line in lines if line.startswith("Results: 3 columns omitted:"))
+    assert "file_result, llm_answer, notes (columns 5-7)" in column
     assert section(summary_table(book), "export")["Results"] == csv_named(out, "results").name
     assert any(line.startswith("Results: 8 rows omitted; 2 retained.") for line in lines)
     assert book["Results"].cell(1, 5).value == data_exporter.COLUMN_OMISSION_MARKER
@@ -208,10 +208,10 @@ def test_shortened_text_names_the_complete_csv_and_record(tmp_path, monkeypatch)
     _, rows = results_sheet(book)
     cell = rows[0]["llm_answer"]
     assert cell.startswith(data_exporter.TRUNCATION_MARKER)
-    assert csv_named(out, "results").name in cell and "record 1, column 5" in cell
+    assert csv_named(out, "results").name in cell and "record 1, column 6" in cell
     assert "Summary for full data" not in cell
     lines = limits_lines(summary_table(book))
-    assert any("Results: Text shortened: llm_answer (column 5), 1 cell." in line for line in lines)
+    assert any("Results: Text shortened: llm_answer (column 6), 1 cell." in line for line in lines)
     _, complete = read_csv_rows(csv_named(out, "results"))
     assert complete[0]["llm_answer"] == text
 
@@ -410,9 +410,10 @@ def test_columns_beyond_the_cap_become_one_marker_column(tmp_path, monkeypatch):
         for m in (COLUMNS_CUT.match(line) for line in limits_lines(summary_table(workbook)))
         if m and m["sheet"] == RESULTS_TITLE
     ]
-    assert len(hits) == 1 and int(hits[0]["cut"]) == 3
+    assert len(hits) == 1 and int(hits[0]["cut"]) == 4
     headers, _ = read_csv_rows(csv_named(out, "results"))
-    assert headers == ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
+    assert headers == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result",
+                       "llm_answer", "notes"]
 
 
 def test_two_over_wide_sheets_get_one_line_each(tmp_path, monkeypatch):
@@ -567,7 +568,7 @@ def test_the_csvs_are_complete_when_every_cut_fires(tmp_path, monkeypatch):
     c.close()
     out = export_dir(tmp_path / "state.db", tmp_path / "out")
     headers, rows = read_csv_rows(csv_named(out, "results"))
-    assert len(headers) == 6 and len(rows) == 8
+    assert len(headers) == 7 and len(rows) == 8
     assert "f" * 100 in rows[0]["notes"]
     assert all(r["llm_answer"] == "a" * 100 for r in rows[1:])
     results_text = csv_named(out, "results").read_text(encoding="utf-8")
@@ -825,7 +826,8 @@ def test_adversarial_reordered_csv_locators_remain_exact_with_each_missing_sibli
     finally:
         c.close()
     headers_to_title = {
-        ("file_id", "file_path", "pages", "file_result", "llm_answer", "notes"): "Results",
+        ("file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_answer",
+         "notes"): "Results",
         ("file_id", "file_path", "file_ext", "total_pages", "page_range", "range_status", "file_to_jpegs_comment",
          "file_to_jpegs_status", "file_to_llm_status", "overall_result"): "Master Registry",
         ("file_id", "page_id", "page_number", "output_file", "page_to_jpeg_status", "page_to_jpeg_comment",
@@ -956,8 +958,8 @@ def resource_rows(spec, title):
                       "raw_model_page_number", "llm_error", "values_json"]
     if title in ("Results", "Master Registry", "Raw file_registry"):
         if title == "Results":
-            yield ["file_id", "file_path", *(["pages"] if ai else []), "file_result",
-                   *(["llm_answer"] if ai else []), "notes"]
+            yield ["file_id", "file_path", *(["pages", "video_frame_timestamp"] if ai else []),
+                   "file_result", *(["llm_answer"] if ai else []), "notes"]
         elif title == "Master Registry":
             yield ["file_id", "file_path", "file_ext", "total_pages", "page_range", "range_status",
                    "file_to_jpegs_comment", "file_to_jpegs_status", "file_to_llm_status", "overall_result"]
@@ -967,7 +969,7 @@ def resource_rows(spec, title):
             if title == "Results":
                 if ai:
                     for k in (1, 2):
-                        yield [i, f"file-{i}.pdf", f"1-{pages}", "ok", f"answer-{i}-{k}", note]
+                        yield [i, f"file-{i}.pdf", f"1-{pages}", "", "ok", f"answer-{i}-{k}", note]
                 else:
                     yield [i, f"file-{i}.pdf", "ok", note]
             elif title == "Master Registry":

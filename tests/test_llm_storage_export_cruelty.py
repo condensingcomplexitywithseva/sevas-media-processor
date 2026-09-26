@@ -199,7 +199,7 @@ def build_mixed_run(tmp_path):
 def test_reader_never_loses_a_request_or_file(tmp_path):
     db = build_mixed_run(tmp_path)
     rows = sheet_rows(export_xlsx(db, tmp_path / "out"), "Results")
-    assert [(r[1], r[2], r[4]) for r in rows[1:]] == [
+    assert [(r[1], r[2], r[5]) for r in rows[1:]] == [
         ("answered.png", 1, "g1"),
         ("answered.png", 2, "g2"),
         ("skipped_by_ai.png", None, None),
@@ -246,7 +246,7 @@ def test_results_explains_a_failed_conversion_beside_the_answers(tmp_path):
 
     workbook = export_xlsx(db_path, tmp_path / "out")
     sheet = sheet_rows(workbook, RESULTS_SHEET_TITLE)
-    assert [(r[1], r[2], r[4]) for r in sheet[1:]] == [
+    assert [(r[1], r[2], r[5]) for r in sheet[1:]] == [
         ("scan.pdf", 1, "g1"),
         ("scan.pdf", 3, "g3"),
         ("never_sent.png", None, None),

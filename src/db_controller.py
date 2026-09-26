@@ -270,6 +270,7 @@ class SQLiteDatabaseController:
                 page_rows = active_session.exec(
                     select(DatabasePageLog.page_number, DatabasePageLog.page_id)
                     .where(DatabasePageLog.file_id == file_id,
+                           DatabasePageLog.page_to_jpeg_status == Status.OK.value,
                            col(DatabasePageLog.page_number).in_(
                                {a.page_number for o in outcomes for a in o.answer_rows
                                 if a.page_number is not None}))).all()

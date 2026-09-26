@@ -21,7 +21,8 @@ from test_results_report import excel_value
 DECLARED = ["genre", "answer"]
 SPREAD_HEADERS = [*LLM_ANSWERS_REPORT_COLUMNS, "llm_genre", "llm_answer"]
 RESULTS_SHEET_TITLE = "Results"
-RESULTS_HEADERS = ["file_id", "file_path", "pages", "file_result", "llm_genre", "llm_answer", "notes"]
+RESULTS_HEADERS = ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_genre",
+                   "llm_answer", "notes"]
 
 
 def seed_db(tmp_path, answer_values, page_count=2, declared=DECLARED):
@@ -148,9 +149,10 @@ def test_reader_sheet_is_one_row_per_answer_row(tmp_path):
         (2, "no_row_returned", ""),
         (None, "hallucinated_page_number", json.dumps({"genre":"g9", "answer":"a9"}))])
     rows = sheet_rows(export_xlsx(db, tmp_path / "out"), "Results")
-    assert rows[0] == ["file_id", "file_path", "pages", "file_result", "llm_genre", "llm_answer", "notes"]
+    assert rows[0] == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_genre",
+                       "llm_answer", "notes"]
     assert len(rows) == 4
-    assert [(r[2], r[4]) for r in rows[1:]] == [(1,"war"), (2,None), (None,"g9")]
+    assert [(r[2], r[5]) for r in rows[1:]] == [(1,"war"), (2,None), (None,"g9")]
     assert "No answer returned" in rows[2][-1] and "Unverified page claim" in rows[3][-1]
 
 
@@ -177,7 +179,7 @@ def test_results_per_file_rows_list_the_pages_actually_sent(tmp_path):
 
     workbook = export_xlsx(db_path, tmp_path / "out")
     rows = sheet_rows(workbook, RESULTS_SHEET_TITLE)
-    assert [(r[2], r[4]) for r in rows[1:]] == [("1-3", "g"), ("4-5, 7", "h")]
+    assert [(r[2], r[3], r[5]) for r in rows[1:]] == [("1-3", None, "g"), ("4-5, 7", None, "h")]
     assert all("failed conversion" in r[-1] for r in rows[1:])
 
 

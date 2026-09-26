@@ -325,7 +325,7 @@ class SQLiteDataExporter:
                     notes.append("AI enabled but no request outcome recorded; AI completion cannot be confirmed")
                 row = [f["file_path"]]
                 if config.ai_enabled:
-                    row.append("")
+                    row += ["", ""]
                 yield [file_id, *row, f["overall_result"], *([""] * len(columns)), " | ".join(notes)]
                 continue
             if failed_requests and request_count > 1:
@@ -355,7 +355,7 @@ class SQLiteDataExporter:
                 request_notes.extend(notes)
                 seen = False
                 for a in con.execute(
-                    """SELECT a.*, p.page_number FROM llm_answers a
+                    """SELECT a.*, p.page_number, p.video_frame_timestamp FROM llm_answers a
                     LEFT JOIN page_log p USING(page_id) WHERE a.request_id=? ORDER BY a.llm_answer_id""",
                     (r["request_id"],),
                 ):
@@ -373,10 +373,14 @@ class SQLiteDataExporter:
                     page: Any = r["pages"] if config.output_mode == "table_per_file" and not error else a["page_number"]
                     if error == "hallucinated_page_number":
                         page = ""
+                    page = self._page_cell(page)
+                    frame_time = ((a["video_frame_timestamp"] or "") if page == a["page_number"]
+                                  else self._frame_time(con, file_id, page))
                     yield [
                         file_id,
                         f["file_path"],
-                        self._page_cell(page),
+                        page,
+                        frame_time,
                         f["overall_result"],
                         *cells,
                         " | ".join(dict.fromkeys(answer_notes)),
@@ -384,10 +388,12 @@ class SQLiteDataExporter:
                 if not seen:
                     if r["request_status"] == "ok":
                         request_notes.append("Request marked successful but no answer row recorded")
+                    page = self._page_cell(r["pages"])
                     yield [
                         file_id,
                         f["file_path"],
-                        self._page_cell(r["pages"]),
+                        page,
+                        self._frame_time(con, file_id, page),
                         f["overall_result"],
                         *([""] * len(columns)),
                         " | ".join(dict.fromkeys(request_notes)),
@@ -399,6 +405,15 @@ class SQLiteDataExporter:
             return int(value) if len(value) < 15 else value
         return "" if value is None else value
 
+    @staticmethod
+    def _frame_time(con: sqlite3.Connection, file_id: int, page: Any) -> str:
+        if not isinstance(page, int):
+            return ""
+        times = con.execute(
+            "SELECT video_frame_timestamp FROM page_log WHERE file_id=? AND page_number=? "
+            "AND page_to_jpeg_status='ok' LIMIT 2", (file_id, page)).fetchall()
+        return times[0][0] if len(times) == 1 else ""
+
     def _reports(self, con: sqlite3.Connection, config: RunConfiguration) -> list[Report]:
         columns = list(config.declared_columns)
 
@@ -408,7 +423,7 @@ class SQLiteDataExporter:
         headers = [
             "file_id",
             "file_path",
-            *(["pages"] if config.ai_enabled else []),
+            *(["pages", "video_frame_timestamp"] if config.ai_enabled else []),
             "file_result",
             *(f"llm_{key}" for key in columns),
             "notes",

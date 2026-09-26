@@ -28,7 +28,7 @@ from schemas import FileSummary, PageResult
 
 RESULTS_TITLE = "Results"
 RESULTS_STEM = "results"
-FIXED_COLUMNS = ["file_id", "file_path", "pages", "file_result", "notes"]
+FIXED_COLUMNS = ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "notes"]
 REQUEST_STATUSES = tuple(s.value for s in schemas.RequestStatus)
 
 
@@ -274,13 +274,15 @@ def test_acceptance_example_is_five_complete_reader_rows(tmp_path):
     db = tmp_path / "state.db"
     seed_acceptance_example(db)
     headers, rows = read_csv_rows(export_results_csv(db, tmp_path / "csv"))
-    assert headers == ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
-    assert [(r["file_path"], r["pages"], r["file_result"], r["llm_answer"]) for r in rows] == [
-        ("notes.txt", "", "fail", ""),
-        ("scan.pdf", "1, 3", "partial_fail", "invoice"),
-        ("broken.heic", "", "fail", ""),
-        ("receipt.png", "1", "partial_fail", ""),
-        ("clip.mp4", "1", "ok", "a cat"),
+    assert headers == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_answer",
+                       "notes"]
+    assert [(r["file_path"], r["pages"], r["video_frame_timestamp"], r["file_result"], r["llm_answer"])
+            for r in rows] == [
+        ("notes.txt", "", "", "fail", ""),
+        ("scan.pdf", "1, 3", "", "partial_fail", "invoice"),
+        ("broken.heic", "", "", "fail", ""),
+        ("receipt.png", "1", "", "partial_fail", ""),
+        ("clip.mp4", "1", "00:00:00.00", "ok", "a cat"),
     ]
     assert "Unsupported file extension" in rows[0]["notes"]
     assert "1 page(s) failed conversion" in rows[1]["notes"]
@@ -294,9 +296,47 @@ def test_acceptance_example_is_five_complete_reader_rows(tmp_path):
     assert isinstance(sheet_data[3]["pages"], int)
     assert isinstance(sheet_data[1]["pages"], str)
     sheet = workbook["Results"]
-    assert sheet.freeze_panes == "A2" and sheet.auto_filter.ref == "A1:F6"
+    assert sheet.freeze_panes == "A2" and sheet.auto_filter.ref == "A1:G6"
     assert sheet.column_dimensions["A"].width == 10 and sheet.column_dimensions["B"].width == 32
     assert all(cell.font.bold for cell in sheet[1])
+
+
+@pytest.mark.parametrize("mode", ["table_per_page", "table_per_file"])
+def test_results_shows_the_frame_time_of_a_row_naming_one_frame(tmp_path, mode):
+    db = tmp_path / "state.db"
+    c = SQLiteDatabaseController(db)
+    add_file(c, 1, "clip.mp4", [
+        (1, "1_clip_page_1.jpg", "ok", "", 0.0),
+        (2, "1_clip_page_2.jpg", "ok", "", 1.63),
+        (3, "1_clip_page_3.jpg", "skipped", "Scene static", 3.23),
+        (4, "1_clip_page_4.jpg", "ok", "", 4.87),
+        (4, "", "failure", "late failure", None),
+    ])
+    store_requests(c, 1, [
+        request_outcome(request_number=1, pages=(1, 2), answer_rows=(
+            answer_row(1, "1", "", {"answer": "a"}),
+            answer_row(2, "2", "", {"answer": "b"}),
+            answer_row(None, "9", "hallucinated_page_number", {"answer": "x"}),
+        )),
+        request_outcome(request_number=2, pages=(4,), status="network_failure", error="offline"),
+    ])
+    add_file(c, 2, "photo.jpg", [(1, "2_photo_page_1.jpg", "ok", "", None)])
+    store_requests(c, 2, [request_outcome(pages=(1,), answer_rows=(answer_row(1, "1", "", {"answer": "c"}),))])
+    record_configuration(c, True, output_mode=mode)
+    c.close()
+    headers, rows = read_csv_rows(export_results_csv(db, tmp_path / "csv"))
+    assert headers[2:4] == ["pages", "video_frame_timestamp"]
+    per_page = mode == "table_per_page"
+    assert [(r["pages"], r["video_frame_timestamp"], r["llm_answer"]) for r in rows] == [
+        ("1" if per_page else "1-2", "00:00:00.00" if per_page else "", "a"),
+        ("2" if per_page else "1-2", "00:00:01.63" if per_page else "", "b"),
+        ("", "", "x"),
+        ("4", "00:00:04.87", ""),
+        ("1", "", "c"),
+    ]
+    _, sheet_data = results_sheet(export_workbook(db, tmp_path / "xlsx"))
+    assert [cell_text(row["video_frame_timestamp"]) for row in sheet_data] == [
+        r["video_frame_timestamp"] for r in rows]
 
 
 PAIRS = [
@@ -439,7 +479,7 @@ def test_empty_run_and_ai_on_without_requests_keep_recorded_headers(tmp_path):
         headers, rows = read_csv_rows(export_results_csv(db, tmp_path / str(ai_on)))
         assert rows == []
         assert headers == (
-            ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
+            ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_answer", "notes"]
             if ai_on
             else ["file_id", "file_path", "file_result", "notes"]
         )
@@ -684,7 +724,7 @@ def test_escape_encoding_expansion_does_not_trigger_library_truncation(tmp_path)
     with zipfile.ZipFile(next((tmp_path / "out").glob("*.xlsx"))) as archive:
         root = ET.fromstring(archive.read("xl/worksheets/sheet2.xml"))  # noqa: S314
         ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-        node = root.find(".//x:c[@r='E2']/x:is/x:t", ns)
+        node = root.find(".//x:c[@r='F2']/x:is/x:t", ns)
         assert node is not None and node.text is not None
         assert len(node.text) > 32767
         assert excel_value(node.text) == text
@@ -988,7 +1028,8 @@ def test_adversarial_row_conservation_uses_independent_ordered_facts(tmp_path, m
     outcome = make_exporter(db).export_all_formats(tmp_path / "out")
     csv_path = next(Path(r["path"]) for r in outcome.saved if r["report"] == "Results")
     headers, rows = read_csv_rows(csv_path)
-    assert headers == ["file_id", "file_path", "pages", "file_result", "llm_answer", "notes"]
+    assert headers == ["file_id", "file_path", "pages", "video_frame_timestamp", "file_result", "llm_answer",
+                       "notes"]
     assert [(r["file_id"], r["file_path"], r["pages"], r["file_result"], r["llm_answer"]) for r in rows] == [
         ("10", "same.pdf", "1", "partial_fail", "0"),
         ("10", "same.pdf", "1", "partial_fail", "0"),
