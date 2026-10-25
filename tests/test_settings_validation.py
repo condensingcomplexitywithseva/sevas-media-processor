@@ -137,6 +137,52 @@ def test_llm_local_provider_fully_configured_is_clean(mgr, tmp_path):
     assert errors == {}
 
 
+PADDED_PROVIDER = {
+    "url": " http://localhost:1234/v1/chat/completions ", "model": "qwen/qwen3.5-2b\t",
+    "auth_header_key": "Authorization ", "auth_header_format": " Bearer {token}",
+    "extra_header_key": " x-key", "extra_header_value": "value ",
+    "response_extraction_path": "choices[0].message.content ",
+}
+
+
+def test_a_run_uses_single_line_settings_without_surrounding_spaces(mgr, tmp_path):
+    mgr.settings_path.write_text(json.dumps(base_paths(
+        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="lm-studio",
+        LLM_PROVIDERS={"lm-studio": PADDED_PROVIDER},
+        INPUT_FOLDER_PATH=f" {tmp_path / 'input'} ",
+        OUTPUT_FOLDER_PATH=f"{tmp_path / 'output'} ")), encoding="utf-8")
+    settings = mgr.load_strict()
+    active = settings.ACTIVE_PROVIDER_CONFIG
+    assert {field: getattr(active, field) for field in PADDED_PROVIDER} == \
+        {field: value.strip() for field, value in PADDED_PROVIDER.items()}
+    folders = (settings.INPUT_FOLDER_PATH, settings.OUTPUT_FOLDER_PATH)
+    assert folders == (tmp_path / "input", tmp_path / "output")
+
+
+def test_inner_spaces_and_the_max_tokens_field_rule_are_unchanged(mgr, tmp_path):
+    errors, _ = validate(mgr, base_paths(
+        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama",
+        LLM_PROVIDERS={"ollama": {"max_tokens_field": "max tokens"}}))
+    assert errors["LLM_PROVIDERS.ollama.max_tokens_field"]["value"] == "err_max_tokens_field_invalid"
+    from config_validator import ProviderConfig
+    assert ProviderConfig(url="u", model=" my model ").model == "my model"
+    folder = Settings.model_validate({"INPUT_FOLDER_PATH": " my media "}).INPUT_FOLDER_PATH
+    assert str(folder) == "my media"
+
+
+def test_paths_pasted_with_copy_as_path_validate_as_the_paths(mgr, tmp_path):
+    prompt = tmp_path / "my prompt.txt"
+    prompt.write_text("Read the total.", encoding="utf-8")
+    errors, _ = validate(mgr, base_paths(
+        tmp_path, INPUT_FOLDER_PATH=f'"{tmp_path / "input"}"',
+        OUTPUT_FOLDER_PATH=f'"{tmp_path / "output"}"',
+        ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama",
+        LLM_USER_PROMPT_MODE="FILE", LLM_USER_PROMPT=f' "{prompt}" '))
+    assert errors == {}
+    folder = Settings.model_validate({"OUTPUT_FOLDER_PATH": f'"{tmp_path / "output"}"'}).OUTPUT_FOLDER_PATH
+    assert str(folder) == str(tmp_path / "output")
+
+
 def test_llm_mode_type_error_still_surfaces(mgr, tmp_path):
     errors, _ = validate(mgr, base_paths(
         tmp_path, ENABLE_LLM_INFERENCE="banana", LLM_PROVIDER="openai"))

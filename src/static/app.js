@@ -37,7 +37,15 @@
             return toReturn;
         }
 
-        window.originalState = flattenObject(window.rawOriginalState);
+        function controlState(ob) {
+            const state = flattenObject(ob);
+            for (const name in state) {
+                if (typeof state[name] === 'string') state[name] = state[name].replace(/\r\n?/g, '\n');
+            }
+            return state;
+        }
+
+        window.originalState = controlState(window.rawOriginalState);
         window.draftState = Object.assign({}, window.originalState);
         let repairFields = new Set(window.FORM_REPAIR_FIELDS || []);
         const editedFields = new Set();
@@ -116,7 +124,7 @@
                     return arr.slice().sort().join(',');
                 }
                 default:
-                    return String(value).trim();
+                    return String(value);
             }
         }
 
@@ -223,7 +231,7 @@
                 window.diskErrors = acceptedSnapshot.backup_path
                     ? {general: {type: 'i18n', value: 'error_settings_reset'}} : acceptedSnapshot.errors;
             }
-            window.originalState = flattenObject(window.rawOriginalState);
+            window.originalState = controlState(window.rawOriginalState);
             window.draftState = Object.assign({}, window.originalState);
             for (const name of preserve) {
                 if (Object.hasOwn(draft, name)) window.draftState[name] = draft[name];
@@ -287,7 +295,40 @@
             button.style.removeProperty('cursor');
         };
 
+        const PYTHON_SPACE = '[\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
+        const PYTHON_STRIP = new RegExp('^' + PYTHON_SPACE + '+|' + PYTHON_SPACE + '+$', 'g');
+        window.pythonStrip = value => String(value).replace(PYTHON_STRIP, '');
+        window.pathSettingText = function(value) {
+            const text = window.pythonStrip(value === null || value === undefined ? '' : value);
+            return text.length >= 2 && text[0] === '"' && text[text.length - 1] === '"'
+                ? window.pythonStrip(text.slice(1, -1)) : text;
+        };
+
+        window.fullFolderPath = function(value) {
+            const text = window.pathSettingText(value);
+            if (!text || /^[A-Za-z]:/.test(text) || /^[\\/]{2}/.test(text)) return '';
+            const base = String(window.WORKING_FOLDER || '');
+            const drive = (base.match(/^([A-Za-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)/) || [''])[0];
+            const start = /^[\\/]/.test(text) ? [] : base.slice(drive.length).split(/[\\/]+/);
+            const parts = [];
+            for (const part of start.concat(text.split(/[\\/]+/))) {
+                if (part === '' || part === '.') continue;
+                if (part === '..') parts.pop();
+                else parts.push(part);
+            }
+            return drive.replace(/\//g, '\\') + '\\' + parts.join('\\');
+        };
+
+        function renderFolderPaths() {
+            document.querySelectorAll('[data-full-path-for]').forEach(row => {
+                const full = window.fullFolderPath(window.draftState[row.dataset.fullPathFor]);
+                row.querySelector('code').textContent = full;
+                row.style.display = full ? 'block' : 'none';
+            });
+        }
+
         window.updateGlobalControls = function() {
+            renderFolderPaths();
             document.querySelectorAll('input[name], select[name], textarea[name]').forEach(el => {
                 if (!el.name || el.type === 'hidden' || el.disabled) return;
                 let dirty;
@@ -1458,8 +1499,8 @@
                 return;
             }
 
-            let promise = dialogType === 'folder' 
-                ? window.pywebview.api.browse_folder() 
+            let promise = dialogType === 'folder'
+                ? window.pywebview.api.browse_folder(document.getElementById(targetInputId).value)
                 : window.pywebview.api.browse_file();
 
             promise.then(path => {

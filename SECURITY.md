@@ -3,7 +3,9 @@
 Seva's Media Processor is a local Windows desktop application. It reads media files
 from a folder you choose, converts them to JPEGs, and writes the results to a
 folder you choose. **It makes no network connections of its own** — no
-telemetry, no update checks, no analytics, no crash reporting.
+telemetry, no update checks, no analytics, no crash reporting. Its window is
+Microsoft WebView2, the browser engine built into Windows; as in any program
+that uses it, WebView2 talks to Microsoft on its own and keeps its own data.
 
 The optional AI feature is **off by default**. When you switch it on, the
 application sends the converted images to the AI endpoint *you* configured,
@@ -18,7 +20,7 @@ control plus one folder under your own `%APPDATA%`; the one exception is a
 crash log written only if the application cannot start (see "Where your data
 goes"). The setup script does more — see "What the installer does" below.
 
-## Network activity, in full
+## The application's network activity
 
 | When | Where to | What is sent |
 |---|---|---|
@@ -79,7 +81,7 @@ runtime already present on Windows 10 and 11):
 | The run database (`application_state.db`, SQLite) | inside that same output folder |
 | API tokens | `%APPDATA%\SevasMediaProcessor\.env` — plain text, guarded by your Windows profile's file permissions (your own account, plus the machine's administrators, as with any file in your profile) |
 | Logs | `%APPDATA%\SevasMediaProcessor\logs` — the newest 30 are kept, older ones deleted at startup |
-| The window's browser data (its cache, and the interface language and translations the page stores) | `%APPDATA%\SevasMediaProcessor\webview` |
+| The window's browser data (WebView2) | `%APPDATA%\SevasMediaProcessor\webview` |
 | Settings | `settings.json` in the application folder |
 | A crash log, only if the application cannot start | `MEDIA_PROCESSOR_CRASH_LOG.txt` in the output folder, or the folder above it if the output folder cannot be written; if `settings.json` cannot be read or neither folder can be written, on your Desktop (or in your home folder when there is no Desktop folder) |
 
@@ -88,31 +90,34 @@ repository, and are shown masked (`********`) in the user interface.
 
 ## Programs it launches
 
-Three. The "Open settings file" button opens `settings.json` in Windows
+Two. The "Open settings file" button opens `settings.json` in Windows
 Notepad (`%SystemRoot%\System32\notepad.exe`) — `src/routes/settings_api.py`.
-The export buttons open Windows Explorer (`%SystemRoot%\explorer.exe`), to
-reveal an exported file and to open the logs folder —
-`src/routes/export_api.py`. Both are launched by their full path, never by
-a bare name Windows would resolve through its search order. The two links in
-the About dialog open in your default web browser, through Python's
-`webbrowser` module — `src/routes/about_api.py`; it opens only the two
-addresses listed in `src/version.py`, and only when you click one. Two tests
-keep this section true: one sweeps the source for any program started by
-bare name, the other checks the count and the names above against every
-program-launching call in the source.
+It is launched by its full path, never by a bare name Windows would resolve
+through its search order. The two links in the About dialog open in your
+default web browser, through Python's `webbrowser` module —
+`src/routes/about_api.py`; it opens only the two addresses listed in
+`src/version.py`, and only when you click one. The export buttons start no
+program: they ask the Windows Shell to show the exported file, or the newest
+log in the logs folder, selected in an Explorer window
+(`SHOpenFolderAndSelectItems`, `src/windows_shell.py`), which can show items
+but not start anything. Two tests keep this section true: one sweeps the
+source for any program started by bare name, the other checks the count and
+the names above against every program-launching call in the source,
+including the Windows functions that start programs.
 
 ## Third-party libraries
 
 Seva's Media Processor itself is licensed **Apache-2.0** (see `LICENSE.txt`).
 
 The libraries it uses are **not redistributed by this project**. `pip`
-downloads them from PyPI onto your machine at install time. `README.md` lists
-them with a plain description of what each one does.
+downloads them onto your machine at install time, from PyPI or from your
+organisation's package mirror. `README.md` lists them with a plain
+description of what each one does.
 
 `requirements.lock` records the exact version of every package. On the
-tested Python (3.14) the install comes from that lock. On an older or
-newer Python, the script warns you and installs unpinned instead — a path
-the lock file does not describe.
+tested Pythons (3.13 and 3.14) the install comes from that lock. On a
+newer Python, if you choose to continue at your own risk, the script
+installs unpinned instead — a path the lock file does not describe.
 
 Five of the libraries carry native decoders written in C and C++, and they
 — not the readable Python — are what your media files actually enter:
@@ -127,27 +132,41 @@ The application writes only to its own folder, the folders you choose and
 above. The setup script — `install.txt`, which `README.md` tells you
 to paste into PowerShell — does more:
 
-- **If no Python is found**, or an older one is found and you accept its
-  upgrade prompt, it runs
-  `winget install --id Python.Python.3.14 --silent
-  --accept-source-agreements --accept-package-agreements`: a network
+- **If no Python 3.13 or 3.14 is found**, it asks first. It looks on PATH,
+  in the list of the `py` launcher and in the usual install folders. Only
+  if you choose the internet
+  install does it run `winget install --id Python.Python.3.14 --source winget
+  --silent --accept-source-agreements --accept-package-agreements`: a network
   download of the official Python installer, its licence terms accepted,
   and the things a Python install does to a machine — registry keys, PATH
-  changes, `.py` file associations.
+  changes, `.py` file associations. The other choice stops the script, with
+  nothing installed, so that you or your IT department can install Python.
+- **It asks where the libraries come from**: pypi.org, or a package mirror
+  whose address you type. With a mirror, `pip` runs with `--isolated` and
+  `--index-url` set to that address; while it runs, `PIP_CONFIG_FILE` is
+  `nul` and every other `PIP_*` environment variable is removed (pip builds
+  source packages with a second pip that does not get `--isolated`). So no
+  other package address from pip's settings files or `PIP_*` variables is
+  used; a library missing on the mirror stops the setup. The variables are
+  restored afterwards.
+- **`pip` verifies certificates against the Windows certificate store**,
+  through its own `truststore`.
 - **It creates a virtual environment** (the `venv` folder inside the
   application folder) and installs the libraries into it, not into the
-  machine's Python.
-- **It lets `pip` upgrade itself first.**
+  machine's Python. An existing one that can no longer start, because the
+  Python that made it was uninstalled, is deleted and built again.
+- **It lets `pip` upgrade itself first**, from the same source.
 - **It chooses between two dependency lists**: the pinned
-  `requirements.lock` on Python 3.14, or the unpinned fallback on an older
-  or newer Python, after a warning.
+  `requirements.lock` on Python 3.13 or 3.14, or the unpinned fallback on
+  a newer Python, after you choose to continue at your own risk.
 - **It creates the first-run files**, all inside the application folder:
   the empty `input` and `output` folders, and your `settings.json`, copied
   from the committed `settings.example.json` template.
 - **It creates one Desktop shortcut.** No service, no autostart, no
   registry entry of its own.
 
-On a work or managed computer, use `README.md`'s manual option.
+On a work or managed computer, choose to install Python yourself (or ask
+your IT department) and use your organisation's package mirror.
 
 ## Verifying all of this yourself
 
@@ -177,8 +196,8 @@ The command covers every Python program on the machine, so if this
 application is the only one running there is exactly one line. Its address
 is `127.0.0.1` and its port is different every launch.
 Replace `-State Listen` with `-State Established` to see the connections
-it has open instead: with the AI feature off, every connection this
-application holds has `127.0.0.1` as its remote address too.
+it has open instead: with the AI feature off, every connection its Python
+process holds has `127.0.0.1` as its remote address too.
 
 Both commands are PowerShell, the terminal the install instructions
 already tell you to open.
@@ -201,5 +220,6 @@ reading.
 
 ## Reporting a problem
 
-If you find a security issue, please open an issue describing it, or contact
-the maintainer directly if you consider it sensitive.
+To report a security issue privately, use "Report a vulnerability" on the
+Security tab of this project's GitHub page, which keeps the report private.
+Anything else can go in an ordinary issue.

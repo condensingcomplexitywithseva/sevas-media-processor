@@ -364,6 +364,20 @@ def test_token_instructions_are_truthful_before_save_and_after_wipe(open_page, t
             '********' if token_state == 'saved' else page.evaluate("getT('placeholder_token')"))
 
 
+def test_a_double_click_on_reset_keeps_and_shows_the_users_file(open_page, tmp_path, real_settings_guard):
+    page = open_page({}, raw_settings=BROKEN_RAW)
+    page.wait_for_timeout(300)
+    resets = []
+    page.on('requestfinished', lambda r: resets.append(r) if r.url.endswith('/api/settings/reset') else None)
+    page.dblclick('button:has(span[data-i18n="btn_reset_defaults"])')
+    page.wait_for_function("getComputedStyle(document.getElementById('fatal-reset-instructions')).display !== 'none'")
+    page.wait_for_timeout(500)
+    assert len(resets) == 2, "the double click no longer reaches the server twice; revisit this test"
+    backups = sorted(tmp_path.glob('settings_corrupted_backup_*.json'))
+    assert [b.read_text(encoding='utf-8') for b in backups] == [BROKEN_RAW]
+    assert page.locator('#backup-path-display').inner_text() == str(backups[0])
+
+
 def test_lost_reset_reply_reports_uncertainty_after_real_reset(open_page, tmp_path):
     page = open_page({'MAX_DIMENSION': 789})
     before = (tmp_path / 'settings.json').read_bytes()

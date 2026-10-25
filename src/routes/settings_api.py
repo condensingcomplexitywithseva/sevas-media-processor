@@ -16,7 +16,7 @@ from config_loader import (Settings, ROOT_DIR, get_masked_env_tokens, get_settin
                            log_settings_errors, real_token_updates, is_broken_file)
 from config_loader import settings_with_edits, settings_transaction, settings_operations
 from config_validator import settings_form_view, settings_form_repair_fields
-from fs_utils import get_safe_path, text_looks_binary
+from fs_utils import get_safe_path, path_setting_text, text_looks_binary
 
 api_blueprint = Blueprint('api', __name__)
 logger = logging.getLogger(__name__)
@@ -229,6 +229,34 @@ def open_settings_file():
             "message": f"Could not start the text editor. Open this file yourself: {target_path}",
         }), 500
 
+def _backup_name(active_path, timestamp, number):
+    suffix = "" if number == 1 else f"_{number:03d}"
+    return active_path.parent / f"settings_corrupted_backup_{timestamp}{suffix}.json"
+
+
+def _free_backup_path(active_path, timestamp):
+    number = 1
+    while _backup_name(active_path, timestamp, number).exists():
+        number += 1
+    return _backup_name(active_path, timestamp, number)
+
+
+def _move_without_overwriting(active_path, backup_path, timestamp):
+    while True:
+        try:
+            os.rename(active_path, backup_path)
+            return backup_path
+        except FileExistsError:
+            backup_path = _free_backup_path(active_path, timestamp)
+
+
+def _holds(path, settings):
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) == json.loads(settings.model_dump_json())
+    except (OSError, ValueError):
+        return False
+
+
 @api_blueprint.route('/settings/reset', methods=['POST'])
 @settings_transaction()
 @settings_operation
@@ -236,12 +264,17 @@ def reset_settings():
     try:
         active_path = get_settings_path()
         timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = active_path.parent / f"settings_corrupted_backup_{timestamp}.json"
+        defaults = Settings()
+        previous = settings_operations().backup_path
 
-        if active_path.exists():
-            os.replace(active_path, backup_path)
+        if previous and Path(previous).exists() and _holds(active_path, defaults):
+            backup_path = previous
+        else:
+            backup_path = _free_backup_path(active_path, timestamp)
+            if active_path.exists():
+                backup_path = _move_without_overwriting(active_path, backup_path, timestamp)
 
-        save_settings(Settings())
+        save_settings(defaults)
 
         return jsonify({"status": "success", "backup_path": str(backup_path)}), 200
     except Exception as e:
@@ -272,7 +305,7 @@ def get_locale(lang):
 @api_blueprint.route('/preview/file', methods=['POST'])
 def preview_file():
     data = request.json
-    filepath = data.get("filepath", "")
+    filepath = path_setting_text(data.get("filepath"))
 
     if not filepath or not filepath.lower().endswith(".txt"):
         key = "preview_not_txt" if filepath else "preview_no_file"

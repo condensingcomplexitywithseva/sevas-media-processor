@@ -1,40 +1,37 @@
 # Copyright 2026 Vsevolod Belonogov
 # SPDX-License-Identifier: Apache-2.0
 
-import os
+import logging
 import secrets
 import shutil
-import subprocess
+import traceback
 from pathlib import Path
 from threading import Lock
 from typing import Any
 from flask import Blueprint, jsonify, request
 
+import windows_shell
 from config_loader import get_app_data_dir
 from config_validator import tech_folder_path
 from data_exporter import SQLiteDataExporter, ExportError
-from fs_utils import get_safe_path
+from fs_utils import path_setting_text, get_safe_path, humanize_paths, plain_path
 
 exports_bp = Blueprint('exports', __name__)
-
-
-def _explorer_path() -> str:
-    return os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"),
-                        "explorer.exe")
+logger = logging.getLogger(__name__)
 
 
 def _reveal_in_explorer(path) -> bool:
     try:
-        subprocess.Popen([_explorer_path(), "/select," + str(path)])
-        return True
+        return windows_shell.show_in_explorer(Path(plain_path(str(path))))
     except Exception:
         return False
 
 
-def _open_in_explorer(folder) -> bool:
+def _show_logs_folder(logs_dir: Path) -> bool:
     try:
-        subprocess.Popen([_explorer_path(), str(folder)])
-        return True
+        logs = [p for p in logs_dir.glob("system_log_*.txt*") if p.is_file()]
+        newest = max(logs, key=lambda p: p.stat().st_mtime, default=logs_dir)
+        return windows_shell.show_in_explorer(newest)
     except Exception:
         return False
 
@@ -65,6 +62,16 @@ def advance_export_revision() -> int:
 
 def number_export_result(data: dict[str, Any]) -> dict[str, Any]:
     return dict(data, export_revision=advance_export_revision())
+
+
+def unconfirmed_export_outcome(exc: Exception, destination: object,
+                               recovery_id: str | None = None) -> dict[str, Any]:
+    logger.error(f"Report export failed: {exc}\n{traceback.format_exc()}")
+    return {"status": "error", "export_state": "unknown",
+            "message_key": "err_export_outcome_unknown",
+            "message": "The export result could not be confirmed. Check the destination folder.",
+            "detail": humanize_paths(str(exc)), "path": humanize_paths(str(destination)),
+            "recovery_id": recovery_id}
 
 
 def _export_response(data: dict[str, Any]):
@@ -108,8 +115,8 @@ def export_database():
         else:
             from config_loader import load_for_ui
             merged_settings, _ = load_for_ui()
-            output_folder = str(merged_settings.get("OUTPUT_FOLDER_PATH") or "")
-            if not output_folder.strip() or output_folder == ".":
+            output_folder = path_setting_text(merged_settings.get("OUTPUT_FOLDER_PATH"))
+            if not output_folder or output_folder == ".":
                 return _export_response({"status": "error", "export_state": "refused",
                                 "message_key": "err_export_no_folder",
                                 "message": "Choose an Output folder and apply the change before exporting reports."
@@ -138,17 +145,16 @@ def export_database():
         data.pop("database", None)
         data["recovery_id"] = recovery_id
         targets = [Path(r["path"]) for r in outcome.saved if r["format"] == "xlsx"]
-        data["revealed"] = _reveal_in_explorer(targets[-1]) if targets else False
         data["message_key"] = "export_partial" if outcome.failed else "export_complete"
-        return _export_response(data), 207 if outcome.failed else 200
+        result = number_export_result(data)
+        code = 207 if outcome.failed else 200
     except Exception as exc:
-        return _export_response({"status": "error", "export_state": "unknown", "detail": str(exc),
-                        "message": "The export result could not be confirmed. Check the destination folder.",
-                        "message_key": "err_export_outcome_unknown",
-                        "path": str(locals().get("export_dir", "")),
-                        "recovery_id": locals().get("recovery_id")}), 500
+        return _export_response(unconfirmed_export_outcome(
+            exc, locals().get("export_dir", ""), locals().get("recovery_id"))), 500
     finally:
         exec_api.run_controller.lock.release()
+    result["revealed"] = _reveal_in_explorer(targets[-1]) if targets else False
+    return jsonify(result), code
 
 
 @exports_bp.route('/logs', methods=['POST'])
@@ -157,8 +163,8 @@ def export_logs():
         from config_loader import load_for_ui
         merged_settings, _ = load_for_ui()
 
-        output_folder = str(merged_settings.get("OUTPUT_FOLDER_PATH") or "")
-        if not output_folder.strip() or output_folder == ".":
+        output_folder = path_setting_text(merged_settings.get("OUTPUT_FOLDER_PATH"))
+        if not output_folder or output_folder == ".":
             return jsonify({
                 "status": "error",
                 "message": "No Output folder is set. Select one and apply it first.",
@@ -211,7 +217,7 @@ def open_logs_folder():
                 "message_key": "err_export_no_log"
             }), 404
 
-        if not _open_in_explorer(logs_dir):
+        if not _show_logs_folder(logs_dir):
             return jsonify({
                 "status": "error",
                 "message": "Could not open the folder. Copy this path and paste it into File Explorer's address bar.",

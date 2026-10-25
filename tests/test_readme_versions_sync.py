@@ -143,26 +143,28 @@ def test_the_version_line_sits_near_the_top_where_the_updating_section_says():
     )
 
 
-def required_python_from_install_script():
+def supported_pythons_from_install_script():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    major = re.search(r"^\$RequiredMajor\s*=\s*(\d+)", text, re.M)
-    minor = re.search(r"^\$RequiredMinor\s*=\s*(\d+)", text, re.M)
-    assert major and minor, "install.txt no longer declares RequiredMajor/RequiredMinor"
-    return int(major.group(1)), int(minor.group(1))
+    listed = re.search(r"^\$SupportedMinors\s*=\s*@\(([\d,\s]+)\)", text, re.M)
+    automatic = re.search(r"^\$AutoInstallMinor\s*=\s*(\d+)", text, re.M)
+    assert listed and automatic, "install.txt no longer declares SupportedMinors/AutoInstallMinor"
+    supported = [(3, int(minor)) for minor in listed.group(1).split(",")]
+    return supported, (3, int(automatic.group(1)))
 
 
 def test_readme_and_install_script_agree_on_the_python_version():
-    major, minor = required_python_from_install_script()
-    expected = f"{major}.{minor}"
+    supported, automatic = supported_pythons_from_install_script()
+    assert automatic in supported
+    named = " or ".join(f"{major}.{minor}" for major, minor in supported)
     text = README.read_text(encoding="utf-8")
-    assert f"Python {expected}" in text, (
-        f"install.txt requires Python {expected}, and README.md never "
-        f"mentions 'Python {expected}'. The two must name the same version - "
-        "a reader installs from the README and the script enforces the gate."
+    assert f"Python {named}" in text, (
+        f"install.txt accepts Python {named}, and README.md never says "
+        f"'Python {named}'. The two must name the same versions - a reader "
+        "installs from the README and the script enforces the gate."
     )
     script = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    assert f"winget install --id Python.Python.{expected} " in script, (
-        f"install.txt's winget command does not install Python.Python.{expected}"
+    assert 'winget install --id "Python.Python.3.$AutoInstallMinor" ' in script, (
+        "install.txt's winget command no longer installs Python.Python.3.$AutoInstallMinor"
     )
 
 
@@ -178,18 +180,27 @@ def test_the_version_parser_actually_parses():
         parse_python_version("Python three point one four")
 
 
+def installer_python_choice():
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("install.txt's search needs Windows PowerShell")
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    body = text[text.index("& {\n") + len("& {\n"):text.index('Write-Host "2/6')]
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", "& {\n" + body + "}"],
+        cwd=REPO_ROOT, input="\n", capture_output=True, text=True, timeout=120)
+    found = re.search(r"^Found Python (\d+\.\d+\.\d+) at (.+)\.$", result.stdout, re.M)
+    if not found:
+        pytest.skip("install.txt finds no Python 3.13 or 3.14 on this machine")
+    return parse_python_version(found.group(1)), found.group(2)
+
+
 def test_the_suite_runs_on_the_interpreter_the_installer_would_use():
-    exe = shutil.which("python.exe") or shutil.which("python")
-    if exe is None:
-        pytest.skip("no python on PATH - install.txt could not run here either")
-    output = subprocess.run(
-        [exe, "--version"], capture_output=True, text=True, check=True
-    )
-    installer_version = parse_python_version(output.stdout + output.stderr)
+    installer_version, exe = installer_python_choice()
     running = sys.version_info[:3]
     assert running == installer_version, (
         f"this suite runs on Python {'.'.join(map(str, running))}, but the "
-        f"python.exe install.txt would use ({exe}) is "
+        f"Python install.txt would use ({exe}) is "
         f"{'.'.join(map(str, installer_version))}. Two interpreters have "
         "diverged on this machine: rebuild the venv from the installer's "
         "interpreter (or retire the stale install) so the tested "
@@ -197,10 +208,10 @@ def test_the_suite_runs_on_the_interpreter_the_installer_would_use():
     )
 
 
-def test_the_running_interpreter_satisfies_the_documented_minimum():
-    required = required_python_from_install_script()
+def test_the_running_interpreter_is_a_documented_version():
+    supported, _ = supported_pythons_from_install_script()
     running = sys.version_info[:2]
-    assert running >= required, (
+    assert running in supported, (
         f"running Python {running[0]}.{running[1]} but README.md and "
-        f"install.txt require {required[0]}.{required[1]} or newer"
+        f"install.txt support {supported}"
     )

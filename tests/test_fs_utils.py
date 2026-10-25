@@ -23,6 +23,8 @@ from fs_utils import (
     replace_lone_surrogates,
     sanitize_filename_prefix,
     humanize_paths,
+    path_setting_text,
+    picker_start_folder,
     source_sha256,
     source_state,
 )
@@ -216,6 +218,16 @@ def test_file_mode_reads_the_referenced_file(tmp_path):
     prompt_file = tmp_path / "prompt.txt"
     prompt_file.write_text("Describe the image. Ответь по-русски.", encoding="utf-8")
     assert read_prompt(str(prompt_file), "FILE") == "Describe the image. Ответь по-русски."
+
+
+@pytest.mark.parametrize("padding", [" {} ", "{}\t", "\n{}"])
+def test_file_mode_reads_a_padded_path_like_apply_checks_it(tmp_path, padding):
+    prompt_file = tmp_path / "my prompt.txt"
+    prompt_file.write_text("Read the total.", encoding="utf-8")
+    assert read_prompt(padding.format(prompt_file), "FILE") == "Read the total."
+    assert read_prompt(f' "{prompt_file}" ', "FILE") == "Read the total."
+    assert read_prompt(" Read the total. ", "TEXT") == " Read the total. "
+    assert read_prompt('"Quoted text"', "TEXT") == '"Quoted text"'
 
 
 @pytest.mark.parametrize("blank", ["", "   "])
@@ -453,3 +465,47 @@ def test_source_helpers_reach_a_file_beyond_the_legacy_path_limit(tmp_path):
     state = source_state(source)
     assert state is not None and state[0] == 4
     assert source_sha256(source) not in (None, "")
+
+
+
+def test_picker_start_folder_is_the_typed_folder_or_its_nearest_existing_parent(tmp_path, monkeypatch):
+    folder = tmp_path / "media folder, 2026"
+    folder.mkdir()
+    assert picker_start_folder(str(folder)) == str(folder)
+    assert picker_start_folder(str(folder / "not yet" / "created")) == str(folder)
+    working = tmp_path / "app folder"
+    (working / "input").mkdir(parents=True)
+    monkeypatch.chdir(working)
+    assert picker_start_folder("input") == str(working / "input")
+    assert picker_start_folder("not yet/created") == str(working)
+    assert picker_start_folder(f" {folder}\t") == str(folder)
+    assert picker_start_folder("\tinput\n") == str(working / "input")
+    assert picker_start_folder(f'"{folder}"') == str(folder)
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 42, ["C:\\"]])
+def test_picker_start_folder_leaves_an_empty_or_invalid_field_to_windows(value):
+    assert picker_start_folder(value) == ""
+
+
+@windows_only
+def test_picker_start_folder_uses_the_plain_spelling(tmp_path):
+    assert picker_start_folder(get_safe_path(tmp_path)) == str(tmp_path)
+
+
+
+@pytest.mark.parametrize("raw, used", [
+    (r"C:\data", r"C:\data"),
+    ("  C:\\data\t", r"C:\data"),
+    (r'"C:\my data"', r"C:\my data"),
+    (' "C:\\my data" \n', r"C:\my data"),
+    ('" output "', "output"),
+    ('""', ""),
+    ('"', '"'),
+    (r'"C:\data', r'"C:\data'),
+    ('a"b"', 'a"b"'),
+    (None, ""),
+    ("", ""),
+])
+def test_path_setting_text_strips_whitespace_then_one_pair_of_quotes(raw, used):
+    assert path_setting_text(raw) == used

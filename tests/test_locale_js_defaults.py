@@ -12,7 +12,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 LOCALES_DIR = SRC / "locales"
 
 GET_T_CALL = re.compile(
-    r"""getT\(\s*['"]([\w.]+)['"]\s*,\s*(['"])((?:\\.|(?!\2).)*)\2""",
+    r"""getT\(\s*['"]([\w.]+)['"]\s*,\s*(['"])((?:\\.|(?!\2)[^\\])*)\2""",
     re.DOTALL,
 )
 
@@ -44,6 +44,44 @@ def find_calls():
 
 def test_the_sweep_actually_finds_the_calls():
     assert len(list(find_calls())) > 20
+
+
+@pytest.mark.parametrize("source, default", [
+    (r"getT('k', 'Error:\n')", r"Error:\n"),
+    (r"""getT('k', 'it\'s')""", r"it\'s"),
+    (r'''getT("k", "say \"hi\"")''', r"say \"hi\""),
+    (r"getT('k', 'ends in a backslash \\')", "ends in a backslash \\\\"),
+    (r"""getT('k', "it's")""", "it's"),
+])
+def test_the_sweep_reads_escapes_inside_a_default(source, default):
+    match = GET_T_CALL.search(source)
+    assert match and match.group(3) == default
+
+
+def test_an_unclosed_default_full_of_escapes_is_read_in_linear_time():
+    import time
+    text = 'getT("a","' + "\\a" * 24
+    started = time.process_time()
+    assert GET_T_CALL.search(text) is None
+    assert time.process_time() - started < 2.0
+
+
+UNCLOSED_DEFAULTS = {
+    "escapes": "\\a" * 100_000,
+    "escaped backslashes": "\\\\" * 100_000,
+    "escaped closing quotes": '\\"' * 100_000,
+    "plain run": "x" * 200_000,
+    "odd backslash at the end": "x" * 200_000 + "\\",
+    "escapes over many lines": ("\\a" * 50 + "\n") * 2_000,
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNCLOSED_DEFAULTS))
+def test_every_unclosed_default_shape_is_read_in_linear_time(shape):
+    import time
+    started = time.process_time()
+    assert GET_T_CALL.search('getT("a","' + UNCLOSED_DEFAULTS[shape]) is None
+    assert time.process_time() - started < 2.0
 
 
 @pytest.mark.parametrize("locale_name", sorted(p.stem for p in LOCALES_DIR.glob("*.json")))

@@ -149,6 +149,39 @@ def quoted_control_labels(strings):
     return found
 
 
+LETTER_RUN = re.compile(r"[^\W\d_]+")
+EDGE_PUNCTUATION = re.compile(r"^[\W_]+|[\W_]+$")
+CYRILLIC = re.compile(r"[Ѐ-ӿ]")
+LATIN = re.compile(r"[A-Za-z]")
+LATIN_LOOKALIKES = set("aceopxyABCEHKMOPTX")
+
+
+def mixed_script_problems(strings):
+    problems = []
+    for key, value in strings.items():
+        text = PLACEHOLDER.sub(" ", value)
+        problems += [(key, word) for word in LETTER_RUN.findall(text)
+                     if CYRILLIC.search(word) and LATIN.search(word)]
+        words = [EDGE_PUNCTUATION.sub("", word) for word in text.split()]
+        for i, word in enumerate(words):
+            neighbours = words[max(i - 1, 0):i] + words[i + 1:i + 2]
+            if word in LATIN_LOOKALIKES and any(CYRILLIC.search(n) for n in neighbours):
+                problems.append((key, word))
+    return problems
+
+
+def test_no_word_mixes_latin_and_cyrillic_letters():
+    for language, strings in load_locales().items():
+        assert not mixed_script_problems(strings), (language, mixed_script_problems(strings))
+    assert mixed_script_problems({"k": "Анализ c ИИ"}) == [("k", "c")]
+    assert mixed_script_problems({"k": "Файл JPEГ"}) == [("k", "JPEГ")]
+    assert not mixed_script_problems({"k": "Анализ с ИИ: PDF, AI, {provider}, 1920 x 1080"})
+    for text in ("Анализ c, ИИ", "(c) Анализ", "Файл «c» готов"):
+        assert mixed_script_problems({"k": text}) == [("k", "c")], text
+    assert not mixed_script_problems({"k": "Размер 1920 x 1080 пикселей"})
+    assert not mixed_script_problems({"k": "заголовок 'x-api-key' или формат 'R,G,B' от 0"})
+
+
 def test_explanations_do_not_quote_a_copied_control_label():
     for language, strings in load_locales().items():
         assert not quoted_control_labels(strings), (language, quoted_control_labels(strings))

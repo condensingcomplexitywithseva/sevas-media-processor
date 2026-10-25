@@ -31,7 +31,9 @@ Providers cap the size of one request; if a file fails with a 'too large' reply,
             </div>
 
             <div id="user_text_container" class="input-row ui-row-top" style="{% if settings.LLM_USER_PROMPT_MODE == 'FILE' %}display: none;{% endif %}">
-                <textarea class="ui-prompt-text" id="user_text_input" name="LLM_USER_PROMPT" {% if settings.LLM_USER_PROMPT_MODE == 'FILE' %}disabled{% endif %}>{{ settings.LLM_USER_PROMPT if settings.LLM_USER_PROMPT_MODE == 'TEXT' else '' }}</textarea>
+
+                <textarea class="ui-prompt-text" id="user_text_input" name="LLM_USER_PROMPT" {% if settings.LLM_USER_PROMPT_MODE == 'FILE' %}disabled{% endif %}>
+{{ settings.LLM_USER_PROMPT if settings.LLM_USER_PROMPT_MODE == 'TEXT' else '' }}</textarea>
                 <button type="button" class="btn-default ui-list-top" onclick='resetDefaultByName("LLM_USER_PROMPT", {{ default_settings.LLM_USER_PROMPT | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
             </div>
 
@@ -68,7 +70,8 @@ A file with more images than {images} is sent in several requests. In per-file m
         <div class="form-group">
             <label data-i18n="lbl_llm_output_columns">Answer columns:</label>
             <div class="input-row ui-row-top">
-                <textarea class="ui-prompt-text" id="LLM_OUTPUT_COLUMNS" name="LLM_OUTPUT_COLUMNS">{{ settings.LLM_OUTPUT_COLUMNS }}</textarea>
+                <textarea class="ui-prompt-text" id="LLM_OUTPUT_COLUMNS" name="LLM_OUTPUT_COLUMNS">
+{{ settings.LLM_OUTPUT_COLUMNS }}</textarea>
                 <button type="button" class="btn-default ui-list-top" onclick='resetDefaultByName("LLM_OUTPUT_COLUMNS", {{ default_settings.LLM_OUTPUT_COLUMNS | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
             </div>
             <span class="hint" data-i18n="hint_llm_output_columns">Write the columns you want the AI to fill in. Separate names with a comma or put one per line.
@@ -81,7 +84,8 @@ The name 'page' is reserved: the app fills that one in itself. Cannot be empty.<
         <div class="form-group">
             <label data-i18n="lbl_llm_column_meanings">Column meanings:</label>
             <div class="input-row ui-row-top">
-                <textarea class="ui-prompt-text" id="LLM_OUTPUT_COLUMN_INSTRUCTIONS" name="LLM_OUTPUT_COLUMN_INSTRUCTIONS">{{ settings.LLM_OUTPUT_COLUMN_INSTRUCTIONS }}</textarea>
+                <textarea class="ui-prompt-text" id="LLM_OUTPUT_COLUMN_INSTRUCTIONS" name="LLM_OUTPUT_COLUMN_INSTRUCTIONS">
+{{ settings.LLM_OUTPUT_COLUMN_INSTRUCTIONS }}</textarea>
                 <button type="button" class="btn-default ui-list-top" onclick='resetDefaultByName("LLM_OUTPUT_COLUMN_INSTRUCTIONS", {{ default_settings.LLM_OUTPUT_COLUMN_INSTRUCTIONS | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
             </div>
             <span class="hint" data-i18n="hint_llm_column_meanings">Optional. Explain in plain words what each column should contain. Sent to the AI word for word after your prompt.
@@ -100,7 +104,8 @@ Example: 'vendor: the shop name as printed; total: the amount paid, digits only;
             </div>
 
             <div id="sys_text_container" class="input-row ui-row-top" style="{% if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' %}display: none;{% endif %}">
-                <textarea class="ui-prompt-text" id="sys_text_input" name="LLM_SYSTEM_PROMPT" {% if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' %}disabled{% endif %}>{{ settings.LLM_SYSTEM_PROMPT if settings.LLM_SYSTEM_PROMPT_MODE == 'TEXT' else '' }}</textarea>
+                <textarea class="ui-prompt-text" id="sys_text_input" name="LLM_SYSTEM_PROMPT" {% if settings.LLM_SYSTEM_PROMPT_MODE == 'FILE' %}disabled{% endif %}>
+{{ settings.LLM_SYSTEM_PROMPT if settings.LLM_SYSTEM_PROMPT_MODE == 'TEXT' else '' }}</textarea>
                 <button type="button" class="btn-default ui-list-top" onclick='resetDefaultByName("LLM_SYSTEM_PROMPT", {{ default_settings.LLM_SYSTEM_PROMPT | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
             </div>
 

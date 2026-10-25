@@ -167,3 +167,71 @@ def test_apply_normalizes_spelling_on_disk(open_page, tmp_path):
     )
     assert state["apply_disabled"], "UI must be clean after the normalizing Apply"
     assert state["dirty_count"] == 0
+
+
+MODEL = '[name="LLM_PROVIDERS.lm-studio.model"]'
+
+
+def _model_state(page, tmp_path):
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    state = page.evaluate("""selector => ({
+        shown: document.querySelector(selector).value,
+        dirty: document.querySelector(selector).classList.contains('dirty-field'),
+        apply_disabled: document.getElementById('btn-apply').disabled,
+        start_disabled: document.getElementById('btn-start').disabled,
+    })""", MODEL)
+    state["saved"] = saved["LLM_PROVIDERS"]["lm-studio"]["model"]
+    return state
+
+
+def _apply(page):
+    with page.expect_response("**/api/settings/commit") as response:
+        page.click("#btn-apply")
+    assert response.value.status == 200, response.value.json()
+    page.wait_for_function("!window.settingsSavePending && document.getElementById('btn-apply').disabled")
+
+
+def test_a_space_typed_or_removed_in_a_text_field_is_an_edit(open_page, tmp_path):
+    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "lm-studio",
+                      "LLM_PROVIDERS": {"lm-studio": {"model": "provider/model"}}})
+    page.click('[data-tab="ai"]')
+    page.wait_for_timeout(400)
+
+    page.fill(MODEL, "provider/model ")
+    state = _model_state(page, tmp_path)
+    assert state["dirty"] and not state["apply_disabled"] and state["start_disabled"], state
+    _apply(page)
+    assert _model_state(page, tmp_path) == {"shown": "provider/model", "dirty": False, "apply_disabled": True,
+                                           "start_disabled": False, "saved": "provider/model"}
+
+
+def test_a_padded_saved_value_can_be_repaired(open_page, tmp_path):
+    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "lm-studio",
+                      "LLM_PROVIDERS": {"lm-studio": {"model": "other/model "}}})
+    page.click('[data-tab="ai"]')
+    page.wait_for_timeout(400)
+    assert _model_state(page, tmp_path)["shown"] == "other/model "
+
+    page.fill(MODEL, "other/model")
+    state = _model_state(page, tmp_path)
+    assert state["dirty"] and not state["apply_disabled"] and state["start_disabled"], state
+    _apply(page)
+    assert _model_state(page, tmp_path) == {"shown": "other/model", "dirty": False, "apply_disabled": True,
+                                           "start_disabled": False, "saved": "other/model"}
+
+
+def test_a_stored_prompt_shows_as_saved_and_a_retyped_letter_is_no_edit(open_page, tmp_path):
+    for prompt, shown in (("\nRead the total.", "\nRead the total."),
+                          ("Line one\r\nLine two\rLine three", "Line one\nLine two\nLine three")):
+        page = open_page({"LLM_USER_PROMPT": prompt})
+        page.click('[data-tab="ai"]')
+        page.wait_for_timeout(400)
+        assert page.locator("#user_text_input").input_value() == shown
+        page.focus("#user_text_input")
+        page.keyboard.press("End")
+        page.keyboard.type("x")
+        page.keyboard.press("Backspace")
+        page.wait_for_timeout(200)
+        assert page.evaluate("document.getElementById('btn-apply').disabled && !window.hasUnsavedEdits()"), prompt
+        saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+        assert saved["LLM_USER_PROMPT"] == prompt, "nothing is written until an edit is applied"

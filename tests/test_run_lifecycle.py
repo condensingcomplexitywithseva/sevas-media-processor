@@ -92,7 +92,7 @@ def test_crashed_run_ends_with_failed_never_done(make_settings, monkeypatch):
     assert_shutdown_released_the_db(settings)
 
 
-def test_export_failure_keeps_processing_outcome_and_reports_saved_inventory(make_settings, monkeypatch):
+def test_export_failure_keeps_processing_outcome_and_reports_saved_inventory(make_settings, monkeypatch, caplog):
     import data_exporter
     settings = make_settings()
     events = []
@@ -103,7 +103,11 @@ def test_export_failure_keeps_processing_outcome_and_reports_saved_inventory(mak
         raise RuntimeError("Workbook save failed")
 
     monkeypatch.setattr(data_exporter.SQLiteDataExporter, "_workbook", fail_workbook)
-    core.run()
+    with caplog.at_level("ERROR"):
+        core.run()
+    assert [record.getMessage() for record in caplog.records
+            if record.getMessage().startswith("Report export incomplete")] == [
+        "Report export incomplete: Workbook: Workbook save failed"]
     assert events[-1] == {"type": "done"}
     reports = [event for event in events if event["type"] == "export_result"]
     assert len(reports) == 1 and reports[0]["status"] == "error"
@@ -111,6 +115,29 @@ def test_export_failure_keeps_processing_outcome_and_reports_saved_inventory(mak
     assert reports[0]["failed"][0]["report"] == "Workbook"
     assert reports[0]["recovery_id"]
     assert_shutdown_released_the_db(settings)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the long-path prefix is Windows-only")
+def test_unconfirmed_end_of_run_export_reads_like_the_manual_one(make_settings, monkeypatch, caplog):
+    import data_exporter
+    from fs_utils import get_safe_path
+    settings = make_settings()
+    events = []
+    core = ProcessorCore(settings, threading.Event(), on_progress=events.append)
+    monkeypatch.setattr(core.orchestrator, "execute_batch_processing_loop", lambda **kwargs: None)
+    locked = Path(str(settings.TECH_FOLDER_PATH)) / "database_export.xlsx"
+
+    def lose_result(self, destination):
+        raise OSError(22, "Invalid argument", get_safe_path(locked))
+
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "export_all_formats", lose_result)
+    with caplog.at_level("ERROR"):
+        core.run()
+    [report] = [event for event in events if event["type"] == "export_result"]
+    assert report["export_state"] == "unknown" and report["message_key"] == "err_export_outcome_unknown"
+    assert str(locked) in report["detail"] and "\\\\" not in report["detail"], report["detail"]
+    assert "saved" not in report and "failed" not in report
+    assert len([r for r in caplog.records if r.getMessage().startswith("Report export failed")]) == 1
 
 
 

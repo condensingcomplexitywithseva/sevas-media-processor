@@ -138,11 +138,21 @@ def is_network_capable(name):
     )
 
 
+NAMED_SITE = "src/llm_client.py"
+ALLOWED_AT_THE_NAMED_SITE = {"ssl"}
+
+
+def unallowed_network_imports(tree, relative_path):
+    allowed = ALLOWED_AT_THE_NAMED_SITE if relative_path == NAMED_SITE else set()
+    return sorted({n for n in imported_modules(tree) if is_network_capable(n)
+                   and not any(n == root or n.startswith(root + ".") for root in allowed)})
+
+
 def test_no_other_network_capable_module_is_imported():
     offenders = []
     for path in sorted(SRC.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        found = sorted({n for n in imported_modules(tree) if is_network_capable(n)})
+        found = unallowed_network_imports(tree, path.relative_to(REPO_ROOT).as_posix())
         if found:
             offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}: {found}")
     assert not offenders, (
@@ -163,6 +173,13 @@ def test_the_network_import_scan_catches_the_disguised_spellings():
         n for n in imported_modules(ast.parse(snippet)) if is_network_capable(n)
     }
     assert {"urllib.request", "http.client", "socket", "urllib3.util"} <= found
+
+
+def test_the_named_site_exemption_covers_only_the_tls_layer_in_that_file():
+    assert unallowed_network_imports(ast.parse("import ssl\n"), NAMED_SITE) == []
+    assert unallowed_network_imports(ast.parse("import ssl\n"), "src/app_context.py") == ["ssl"]
+    assert unallowed_network_imports(ast.parse("import socket\n"), NAMED_SITE) == ["socket"]
+    assert unallowed_network_imports(ast.parse("import urllib3\n"), NAMED_SITE) == ["urllib3"]
 
 
 def test_the_network_import_scan_ignores_the_harmless_neighbours():
@@ -446,6 +463,40 @@ SPAWN_FUNCS = {
 }
 BROWSER_STEM = "browser"
 
+WIN32_LAUNCHERS = re.compile(
+    r"(ShellExecute(Ex)?|CreateProcess(AsUser|WithLogon|WithToken)?|WinExec)[AW]?")
+
+REFUSED_STARTER_NAMES = {"create_subprocess_exec", "create_subprocess_shell",
+                         "subprocess_exec", "subprocess_shell"}
+REFUSED_STARTER_MODULE = "System.Diagnostics"
+
+
+def _dotted_name(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    return ".".join([node.id, *reversed(parts)]) if isinstance(node, ast.Name) else None
+
+
+def _refused_starter(node):
+    name = (node.attr if isinstance(node, ast.Attribute)
+            else node.id if isinstance(node, ast.Name)
+            else node.name if isinstance(node, ast.alias) else None)
+    if name in REFUSED_STARTER_NAMES:
+        return name
+    if isinstance(node, ast.Attribute):
+        bound = [_dotted_name(node)]
+    elif isinstance(node, ast.Import):
+        bound = [alias.name for alias in node.names]
+    elif isinstance(node, ast.ImportFrom) and node.module:
+        bound = [node.module, *(f"{node.module}.{alias.name}" for alias in node.names)]
+    else:
+        bound = []
+    if any(dotted and f".{REFUSED_STARTER_MODULE}." in f".{dotted}." for dotted in bound):
+        return REFUSED_STARTER_MODULE
+    return None
+
 
 def launches_section():
     text = SECURITY_MD.read_text(encoding="utf-8")
@@ -476,6 +527,20 @@ def _is_spawn_call(node):
 def _program_stems(text, filename="<snippet>"):
     stems = set()
     for node in ast.walk(ast.parse(text)):
+        name = (node.attr if isinstance(node, ast.Attribute)
+                else node.value if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                else None)
+        if name and WIN32_LAUNCHERS.fullmatch(name):
+            raise AssertionError(
+                f"{filename}:{getattr(node, 'lineno', '?')}: Win32 program start {name} - a spawn "
+                "whose program this sweep cannot judge statically"
+            )
+        refused = _refused_starter(node)
+        if refused:
+            raise AssertionError(
+                f"{filename}:{getattr(node, 'lineno', '?')}: program starter {refused} - a spawn "
+                "whose program this sweep cannot judge statically"
+            )
         if not _is_spawn_call(node):
             continue
         assert isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -487,6 +552,17 @@ def _program_stems(text, filename="<snippet>"):
         arg = node.args[index] if len(node.args) > index else None
         if isinstance(arg, (ast.List, ast.Tuple)):
             arg = arg.elts[0] if arg.elts else None
+        elif isinstance(arg, ast.JoinedStr):
+            lead = []
+            for part in arg.values:
+                if isinstance(part, ast.FormattedValue):
+                    arg = part.value
+                    break
+                lead.append(part.value if isinstance(part, ast.Constant) else None)
+            else:
+                arg = None
+            if lead not in ([], ['"']):
+                arg = None
         if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name):
             match = SPAWN_HELPER.fullmatch(arg.func.id)
             assert match, (
@@ -564,8 +640,8 @@ def test_the_page_names_every_program_the_source_launches():
 
 def test_the_launch_extraction_reads_the_page():
     section = launches_section().lower()
-    assert section.strip().split()[0].strip(".:") == "three"
-    assert "notepad" in section and "explorer" in section and BROWSER_STEM in section
+    assert section.strip().split()[0].strip(".:") == "two"
+    assert "notepad" in section and BROWSER_STEM in section
 
 
 def test_the_program_stem_sweep_judges_helpers_and_literals():
@@ -575,6 +651,10 @@ def test_the_program_stem_sweep_judges_helpers_and_literals():
         'subprocess.run([r"C:\\Windows\\explorer.exe", "/select," + p])\n'
     )
     assert _program_stems(snippet) == {"notepad", "explorer"}
+    assert _program_stems(
+        "import subprocess\n"
+        "subprocess.Popen(f'\"{_explorer_path()}\" /select,\"{path}\"')\n"
+    ) == {"explorer"}
     assert _program_stems("import webbrowser\nwebbrowser.open(url)\n") == {BROWSER_STEM}
     assert _program_stems("import webbrowser\nwebbrowser.get().open_new_tab(url)\n") == {BROWSER_STEM}
 
@@ -583,3 +663,30 @@ def test_the_program_stem_sweep_refuses_to_guess():
     snippet = "import subprocess\nsubprocess.Popen([editor, path])\n"
     with pytest.raises(AssertionError, match="cannot judge"):
         _program_stems(snippet)
+    for line in ("subprocess.Popen(f'\"{editor}\" \"{path}\"')",
+                 "subprocess.Popen(f'cmd /c \"{_explorer_path()}\"')",
+                 "subprocess.Popen(f'{path}')"):
+        with pytest.raises(AssertionError, match=r"cannot judge|spawn via"):
+            _program_stems("import subprocess\n" + line + "\n")
+    for line in ("ctypes.windll.shell32.ShellExecuteW(None, 'open', path, None, None, 1)",
+                 "shell32.ShellExecuteExW(ctypes.byref(info))",
+                 "kernel32.CreateProcessW(None, line, None, None, False, 0, None, None, si, pi)",
+                 "getattr(kernel32, 'WinExec')(command, 1)"):
+        with pytest.raises(AssertionError, match="Win32 program start"):
+            _program_stems("import ctypes\n" + line + "\n")
+    assert _program_stems("shell32.SHOpenFolderAndSelectItems(item, 0, None, 0)\n") == set()
+    for line in ("asyncio.create_subprocess_exec('notepad.exe', p)",
+                 "from asyncio import create_subprocess_shell",
+                 "from System.Diagnostics import Process",
+                 "import System.Diagnostics",
+                 "System.Diagnostics.Process.Start('notepad.exe')",
+                 "from System import Diagnostics",
+                 "from System.Diagnostics.Process import Start",
+                 "clr.System.Diagnostics.Process.Start('notepad.exe')",
+                 "loop.subprocess_exec(Protocol, 'notepad.exe', p)",
+                 "asyncio.get_running_loop().subprocess_shell(Protocol, 'notepad.exe x')"):
+        with pytest.raises(AssertionError, match="program starter"):
+            _program_stems(line + "\n")
+    assert _program_stems("import clr\nfrom System.Drawing import Icon\n"
+                          "from System.Windows.Forms import MethodInvoker\n"
+                          "from System import Drawing\n") == set()

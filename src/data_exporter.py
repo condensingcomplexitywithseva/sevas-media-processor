@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fs_utils import get_safe_path, replace_lone_surrogates
+from fs_utils import get_safe_path, humanize_paths, plain_path, replace_lone_surrogates
 from schemas import ConfigurationError, OverallResult, RequestStatus, RunConfiguration, Status
 
 exporter_logger = logging.getLogger("DataExporter")
@@ -167,6 +167,15 @@ def error_category(exc: Exception) -> str:
     if isinstance(exc, (ValueError, ConfigurationError, sqlite3.DatabaseError)):
         return "data"
     return "write_failed"
+
+
+def failure_record(report: str, report_format: str, exc: Exception) -> dict[str, str]:
+    return {
+        "report": report,
+        "format": report_format,
+        "category": error_category(exc),
+        "error": humanize_paths(replace_lone_surrogates(str(exc))),
+    }
 
 
 def _cell(value: Any) -> Any:
@@ -894,7 +903,7 @@ class SQLiteDataExporter:
                 exporter_logger.warning("Could not clean up workbook: %s", exc)
 
     def _export(self, directory: Path, timestamp: str | None, workbook: bool) -> ExportOutcome:
-        directory = directory.resolve()
+        directory = Path(plain_path(str(directory.resolve())))
         outcome = ExportOutcome(str(self.database_path.resolve()), str(directory))
         if not Path(get_safe_path(self.database_path)).is_file():
             raise ConfigurationError(f"Cannot export missing database: {self.database_path}")
@@ -923,14 +932,7 @@ class SQLiteDataExporter:
                     )
                     outcome.saved.append({"report": report.title, "format": "csv", "path": str(path)})
                 except Exception as exc:
-                    outcome.failed.append(
-                        {
-                            "report": report.title,
-                            "format": "csv",
-                            "category": error_category(exc),
-                            "error": replace_lone_surrogates(str(exc)),
-                        }
-                    )
+                    outcome.failed.append(failure_record(report.title, "csv", exc))
             if workbook:
                 try:
                     summary = self._summary(con, config)
@@ -940,31 +942,19 @@ class SQLiteDataExporter:
                     )
                     outcome.saved.append({"report": "Workbook", "format": "xlsx", "path": str(path)})
                 except Exception as exc:
-                    outcome.failed.append(
-                        {
-                            "report": "Workbook",
-                            "format": "xlsx",
-                            "category": error_category(exc),
-                            "error": replace_lone_surrogates(str(exc)),
-                        }
-                    )
+                    outcome.failed.append(failure_record("Workbook", "xlsx", exc))
                     if error_category(exc) == "data":
                         self._recovery(con, directory, stamp, outcome)
         except ConfigurationError:
             raise
         except Exception as exc:
-            outcome.failed.append(
-                {
-                    "report": "Export",
-                    "format": "all",
-                    "category": error_category(exc),
-                    "error": replace_lone_surrogates(str(exc)),
-                }
-            )
+            outcome.failed.append(failure_record("Export", "all", exc))
         finally:
             con.close()
         if outcome.failed:
-            raise ExportError(outcome)
+            error = ExportError(outcome)
+            exporter_logger.error("Report export incomplete: %s", error)
+            raise error
         return outcome
 
     def _recovery(self, con: sqlite3.Connection, directory: Path, stamp: str, outcome: ExportOutcome) -> None:
@@ -990,14 +980,7 @@ class SQLiteDataExporter:
             outcome.recovery = True
             outcome.saved.append({"report": "Recovery workbook", "format": "xlsx", "path": str(path)})
         except Exception as exc:
-            outcome.failed.append(
-                {
-                    "report": "Recovery workbook",
-                    "format": "xlsx",
-                    "category": error_category(exc),
-                    "error": replace_lone_surrogates(str(exc)),
-                }
-            )
+            outcome.failed.append(failure_record("Recovery workbook", "xlsx", exc))
 
     def export_all_formats(self, output_directory_path: Path) -> ExportOutcome:
         return self._export(output_directory_path, None, True)

@@ -1323,13 +1323,52 @@ def assert_benchmark_scaling(samples):
     sizes = sorted({s["size"] for s in samples})
     assert len(sizes) >= 2
     assert sizes[-1] == 4 * sizes[0]
-    times = [median(s["seconds"] for s in samples if s["size"] == size) for size in sizes]
-    assert times[0] > 0
+    cpu = [median(s["cpu"] for s in samples if s["size"] == size) for size in sizes]
+    elapsed = [median(s["seconds"] for s in samples if s["size"] == size) for size in sizes]
+    message = f"export CPU time scaling: sizes={sizes}, cpu medians={cpu}, elapsed medians={elapsed}"
+    assert cpu[0] > 0, f"no measurable CPU time: cpu medians={cpu}"
     for index in range(1, len(sizes)):
         factor = sizes[index] / sizes[index - 1]
-        assert times[index] < 2 * factor * times[index - 1], (
-            f"export time scaling: sizes={sizes}, medians={times}")
-    assert times[-1] < 8 * times[0], f"export time scaling: sizes={sizes}, medians={times}"
+        assert cpu[index] < 2 * factor * cpu[index - 1], message
+    assert cpu[-1] < 8 * cpu[0], message
+
+
+BENCHMARK_WORKLOADS = [("files", (1000, 2000, 4000), False),
+                       ("ai", (1000, 2000, 4000), False),
+                       ("giant", (50000, 100000, 200000), False),
+                       ("ai", (250, 1000), True)]
+
+
+def child_failure(error):
+    stderr = error.stderr or ""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors="replace")
+    tail = "\n".join(stderr.strip().splitlines()[-20:])
+    return f"{error}\n{tail}" if tail else f"{error} (no stderr)"
+
+
+def run_benchmark_workloads(take_sample):
+    import subprocess
+
+    failures = []
+    for kind, sizes, slow in BENCHMARK_WORKLOADS:
+        label = f"{kind} control" if slow else kind
+        try:
+            samples = [take_sample(kind, size, slow, repeat) for size in sizes for repeat in range(3)]
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            failures.append(f"{label}: {child_failure(error)}")
+            continue
+        try:
+            assert_benchmark_scaling(samples)
+        except AssertionError as error:
+            if slow and str(error).startswith("export CPU time scaling"):
+                print(f"Repeated-prefix control rejected: {error}", flush=True)
+            else:
+                failures.append(f"{label}: {error}")
+        else:
+            if slow:
+                failures.append(f"{label}: repeated-prefix control was accepted")
+    return failures
 
 
 def run_benchmark_child(command, scratch, timeout=120):
@@ -1342,13 +1381,209 @@ def run_benchmark_child(command, scratch, timeout=120):
 
 @pytest.mark.parametrize("bad", [False, True])
 def test_benchmark_verdict_separates_proportional_and_quadratic_work(bad):
-    samples = [{"size": n, "seconds": (n / 1000) ** (2 if bad else 1) * offset}
+    samples = [{"size": n, "seconds": (n / 1000) ** (2 if bad else 1) * offset,
+                "cpu": (n / 1000) ** (2 if bad else 1) * offset * 0.97}
                for n in (1000, 2000, 4000) for offset in (0.9, 1.0, 1.1)]
     if bad:
-        with pytest.raises(AssertionError, match="export time scaling"):
+        with pytest.raises(AssertionError, match="export CPU time scaling"):
             assert_benchmark_scaling(samples)
     else:
         assert_benchmark_scaling(samples)
+
+
+def test_benchmark_verdict_survives_a_stalled_runner():
+    recorded = {1000: (0.92, 0.88), 2000: (3.76, 1.72), 4000: (6.60, 3.63)}
+    samples = [{"size": n, "seconds": elapsed * offset, "cpu": cpu * offset}
+               for n, (elapsed, cpu) in recorded.items() for offset in (0.98, 1.0, 1.02)]
+    assert_benchmark_scaling(samples)
+
+
+def scaling_samples(kind, size, slow, repeat):
+    work = size / 1000
+    if slow or kind == "files":
+        work *= work
+    return {"kind": kind, "size": size, "seconds": work * 1.05, "cpu": work}
+
+
+@pytest.mark.parametrize("broken", ["first-workload", "control-accepted"])
+def test_benchmark_runs_every_workload_before_its_verdict(broken):
+    taken = []
+
+    def take_sample(kind, size, slow, repeat):
+        taken.append((kind, size, slow))
+        if broken == "first-workload":
+            return scaling_samples(kind, size, slow, repeat)
+        return scaling_samples("ai", size, False, repeat)
+
+    failures = run_benchmark_workloads(take_sample)
+    assert {(kind, slow) for kind, _, slow in taken} == {
+        (kind, slow) for kind, _, slow in BENCHMARK_WORKLOADS}
+    assert len(taken) == 3 * sum(len(sizes) for _, sizes, _ in BENCHMARK_WORKLOADS)
+    assert len(failures) == 1
+    if broken == "first-workload":
+        assert failures[0].startswith("files:")
+        assert "cpu medians" in failures[0] and "elapsed medians" in failures[0]
+    else:
+        assert "repeated-prefix control was accepted" in failures[0]
+
+
+def samples_with_medians(cpu_by_size, elapsed_by_size=None):
+    samples = []
+    for size, cpu in cpu_by_size.items():
+        values = cpu if isinstance(cpu, list) else [cpu] * 3
+        elapsed = (elapsed_by_size or {}).get(size)
+        samples += [{"size": size, "cpu": value, "seconds": value * 1.05 if elapsed is None else elapsed}
+                    for value in values]
+    return samples
+
+
+@pytest.mark.parametrize("case", ["cpu-quadratic-elapsed-proportional", "cpu-proportional-elapsed-stalled"])
+def test_benchmark_verdict_reads_cpu_time_and_never_elapsed_time(case):
+    if case == "cpu-quadratic-elapsed-proportional":
+        samples = samples_with_medians({1000: 1.0, 2000: 4.0, 4000: 16.0},
+                                       {1000: 1.0, 2000: 2.0, 4000: 4.0})
+        with pytest.raises(AssertionError, match="export CPU time scaling"):
+            assert_benchmark_scaling(samples)
+    else:
+        samples = samples_with_medians({1000: 1.0, 2000: 2.0, 4000: 4.0},
+                                       {1000: 1.0, 2000: 300.0, 4000: 900.0})
+        assert_benchmark_scaling(samples)
+
+
+@pytest.mark.parametrize(("large", "small", "passes"), [
+    ([4.0, 4.1, 400.0], [1.0, 1.0, 1.0], True),
+    ([4.0, 400.0, 400.0], [1.0, 1.0, 1.0], False),
+    ([4.0, 4.0, 4.0], [0.01, 1.0, 1.0], True),
+])
+def test_benchmark_verdict_takes_the_median_of_three_samples(large, small, passes):
+    samples = samples_with_medians({1000: small, 2000: 2.0, 4000: large})
+    if passes:
+        assert_benchmark_scaling(samples)
+    else:
+        with pytest.raises(AssertionError, match="export CPU time scaling"):
+            assert_benchmark_scaling(samples)
+
+
+@pytest.mark.parametrize(("medians", "passes"), [
+    ((1.0, 3.99, 7.99), True),
+    ((1.0, 3.9, 15.2), False),
+    ((1.0, 4.0, 7.9), False),
+    ((1.0, 1.5, 6.0), False),
+    ((1.0, 2.9, 8.0), False),
+])
+def test_benchmark_verdict_checks_every_step_and_the_whole_span_strictly(medians, passes):
+    samples = samples_with_medians(dict(zip((1000, 2000, 4000), medians, strict=True)))
+    if passes:
+        assert_benchmark_scaling(samples)
+    else:
+        with pytest.raises(AssertionError, match="export CPU time scaling"):
+            assert_benchmark_scaling(samples)
+
+
+@pytest.mark.parametrize(("cpu_by_size", "passes"), [
+    ({50000: 0.4, 100000: 0.8, 200000: 1.6}, True),
+    ({50000: 0.4, 100000: 1.6, 200000: 6.4}, False),
+    ({250: 1.0, 1000: 7.9}, True),
+    ({250: 1.0, 1000: 8.0}, False),
+    ({250: 1.0, 1000: 14.2}, False),
+])
+def test_benchmark_verdict_uses_each_workload_s_own_sizes(cpu_by_size, passes):
+    samples = samples_with_medians(cpu_by_size)
+    if passes:
+        assert_benchmark_scaling(samples)
+    else:
+        with pytest.raises(AssertionError, match="export CPU time scaling"):
+            assert_benchmark_scaling(samples)
+
+
+@pytest.mark.parametrize("broken", ["no-cpu-time", "one-size", "child-failed"])
+def test_a_broken_control_is_never_counted_as_rejected(broken):
+    import subprocess
+
+    def take_sample(kind, size, slow, repeat):
+        if not slow:
+            return scaling_samples("ai", size, False, repeat)
+        if broken == "no-cpu-time":
+            return {"kind": kind, "size": size, "seconds": 1.0, "cpu": 0.0}
+        if broken == "one-size":
+            return scaling_samples(kind, 250, True, repeat)
+        raise subprocess.CalledProcessError(1, ["--sample"])
+
+    failures = run_benchmark_workloads(take_sample)
+    assert len(failures) == 1 and failures[0].startswith("ai control:")
+    assert "rejected" not in failures[0]
+
+
+@pytest.mark.parametrize("child", ["healthy", "failed", "timed-out"])
+def test_a_failed_benchmark_child_fails_its_workload_with_its_reason(tmp_path, child):
+    scripts = {
+        "healthy": "print('{}')",
+        "failed": ("import sys; sys.stderr.write('Traceback (most recent call last):\\n"
+                   "AssertionError: Results row ' + str(3 + 4) + ' differs\\n'); sys.exit(3)"),
+        "timed-out": ("import sys, time; sys.stderr.write('stuck in ' + 'the export\\n'); "
+                      "sys.stderr.flush(); time.sleep(30)"),
+    }
+    taken = []
+
+    def take_sample(kind, size, slow, repeat):
+        taken.append((kind, slow))
+        if kind == "files" and repeat == 0 and size == 1000:
+            run_benchmark_child([sys.executable, "-c", scripts[child]], tmp_path, timeout=2)
+        return scaling_samples("ai", size, slow, repeat)
+
+    failures = run_benchmark_workloads(take_sample)
+
+    assert set(taken) == {(kind, slow) for kind, _, slow in BENCHMARK_WORKLOADS}
+    if child == "healthy":
+        assert failures == []
+        return
+    assert len(failures) == 1 and failures[0].startswith("files:"), failures
+    assert taken.count(("files", False)) == 1, "the failed workload's other samples still ran"
+    if child == "failed":
+        assert "non-zero exit status 3" in failures[0]
+        assert "AssertionError: Results row 7 differs" in failures[0]
+    else:
+        assert "timed out after 2 seconds" in failures[0]
+        assert "stuck in the export" in failures[0]
+
+
+def test_a_failed_child_s_reason_keeps_only_the_end_of_its_stderr():
+    import subprocess
+
+    stderr = "".join(f"line {number}\n" for number in range(1, 101))
+    reason = child_failure(subprocess.CalledProcessError(1, ["--sample"], stderr=stderr))
+    assert reason.endswith("line 81\n" + "\n".join(f"line {n}" for n in range(82, 101)))
+    assert "line 80\n" not in reason
+
+
+def test_benchmark_cpu_time_covers_the_export_and_nothing_else(tmp_path, monkeypatch):
+    def burn(seconds):
+        end = time.process_time() + seconds
+        while time.process_time() < end:
+            pass
+
+    real_database, real_output = resource_database, assert_resource_output
+    real_export = data_exporter.SQLiteDataExporter.export_csv
+
+    def slow_database(*args, **kwargs):
+        spec = real_database(*args, **kwargs)
+        burn(1.0)
+        return spec
+
+    def slow_readback(*args, **kwargs):
+        burn(1.0)
+        return real_output(*args, **kwargs)
+
+    def slow_export(self, *args, **kwargs):
+        burn(0.5)
+        return real_export(self, *args, **kwargs)
+
+    monkeypatch.setitem(globals(), "resource_database", slow_database)
+    monkeypatch.setitem(globals(), "assert_resource_output", slow_readback)
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "export_csv", slow_export)
+    result = benchmark_sample(tmp_path, "ai", 20)
+    assert 0.5 - 0.05 <= result["cpu"] < 0.9, result
+    assert result["seconds"] >= result["cpu"] - 0.05, result
 
 
 def test_benchmark_watchdog_reaps_child_and_owns_its_temporary_files(tmp_path):
@@ -1386,27 +1621,18 @@ def report_benchmark():
                       "sqlite": sqlite3.sqlite_version, "openpyxl": importlib.metadata.version("openpyxl"),
                       "samples_per_size": 3, "tracing": False}), flush=True)
     with tempfile.TemporaryDirectory(prefix="report-benchmark-") as root:
-        for kind, sizes, slow in [("files", (1000, 2000, 4000), False),
-                                  ("ai", (1000, 2000, 4000), False),
-                                  ("giant", (50000, 100000, 200000), False),
-                                  ("ai", (500, 2000), True)]:
-            samples = []
-            for size in sizes:
-                for repeat in range(3):
-                    folder = Path(root) / f"{kind}-{size}-{repeat}-{slow}"
-                    folder.mkdir()
-                    result = run_benchmark_child(
-                        [sys.executable, str(Path(__file__).resolve()), "--sample", str(folder),
-                         kind, str(size), "slow" if slow else "healthy"], folder)
-                    sample = json.loads(result.stdout)
-                    samples.append(sample)
-                    print(json.dumps({**sample, "repeat": repeat + 1, "control": slow}), flush=True)
-            if slow:
-                with pytest.raises(AssertionError, match="export time scaling"):
-                    assert_benchmark_scaling(samples)
-                print("Repeated-prefix control rejected", flush=True)
-            else:
-                assert_benchmark_scaling(samples)
+        def take_sample(kind, size, slow, repeat):
+            folder = Path(root) / f"{kind}-{size}-{repeat}-{slow}"
+            folder.mkdir()
+            result = run_benchmark_child(
+                [sys.executable, str(Path(__file__).resolve()), "--sample", str(folder),
+                 kind, str(size), "slow" if slow else "healthy"], folder)
+            sample = json.loads(result.stdout)
+            print(json.dumps({**sample, "repeat": repeat + 1, "control": slow}), flush=True)
+            return sample
+
+        failures = run_benchmark_workloads(take_sample)
+    assert not failures, "\n".join(failures)
     print("Report benchmark passed: healthy scaling and broken control verified", flush=True)
 
 

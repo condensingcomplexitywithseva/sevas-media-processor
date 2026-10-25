@@ -8,21 +8,23 @@
         <div class="ui-result" id="export-db-result" style="display: none;" role="status" aria-live="polite">
             <div id="export-db-status" class="hint"></div>
             <div id="export-db-reason" class="hint"></div>
+            <div id="export-db-reason-copy" style="display: none;"></div>
             <div id="export-db-saved" class="hint"></div>
             <div id="export-db-limits" class="hint"></div>
             <div class="ui-recovery-actions" id="export-db-actions" style="display: none;">
                 <button type="button" class="btn-default" onclick="window.exportDatabase(true)" data-i18n="btn_retry_export">Retry export</button>
                 <button type="button" class="btn-default" onclick="window.saveReportsElsewhere()" data-i18n="btn_export_elsewhere">Save reports elsewhere</button>
             </div>
-            <details id="export-db-details">
-                <summary class="hint ui-disclosure" data-i18n="export_file_details">File details</summary>
+
+            <div id="export-db-details">
+                <div class="hint" data-i18n="export_files_heading">Files</div>
                 <ul id="export-db-files" class="hint ui-file-list"></ul>
                 <div id="export-db-location">
-            <span class="hint" data-i18n="lbl_exported_to">Exported to:</span>
-            <code class="ui-location" id="export-db-path" style="display: inline-block;"></code>
-            <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("export-db-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+                    <span class="hint" data-i18n="lbl_exported_to">Exported to:</span>
+                    <code class="ui-location" id="export-db-path" style="display: inline-block;"></code>
+                    <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("export-db-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
                 </div>
-            </details>
+            </div>
         </div>
 
         <button class="ui-export-button" onclick="window.exportLogs()">
@@ -110,6 +112,19 @@
         return Object.assign(window.serverNotice(data), {path: ''});
     }
 
+    function exportCopyButton(text) {
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'btn-default ui-copy-button';
+        copy.style.display = 'inline-flex';
+        const label = document.createElement('span');
+        label.dataset.i18n = 'btn_copy_console';
+        label.textContent = window.getT('btn_copy_console');
+        copy.append('📋 ', label);
+        copy.addEventListener('click', () => window.copyTextToClipboard(text, copy));
+        return copy;
+    }
+
     function exportSavedMessage(files) {
         const workbooks = files.filter(file => file.format === 'xlsx').map(exportReportName);
         const csvCount = files.filter(file => file.format === 'csv').length;
@@ -174,6 +189,9 @@
             {textForLocale: () => exportFailureMessage(data)} : message);
         window.renderMessage(document.getElementById('export-db-reason'), inventory ?
             {textForLocale: () => exportFailureReasons(data)} : {text: data.detail || ''});
+        const reasonCopy = document.getElementById('export-db-reason-copy');
+        reasonCopy.replaceChildren(...(!inventory && data.detail ? [exportCopyButton(data.detail)] : []));
+        reasonCopy.style.display = reasonCopy.childElementCount ? 'block' : 'none';
         document.getElementById('export-db-saved').textContent = inventory ?
             exportSavedMessage(data.saved || []) : '';
         document.getElementById('export-db-limits').textContent =
@@ -194,7 +212,13 @@
             const item = document.createElement('li');
             item.textContent = window.getT('export_not_saved') + ': ' + exportReportName(file) + ' - ' +
                 window.getT('export_error_' + file.category, file.error || window.getT('export_error_write_failed'));
-            item.title = file.error || window.getT('export_error_' + file.category, window.getT('export_error_write_failed'));
+            if (file.error) {
+                const diagnostic = document.createElement('div');
+                const text = document.createElement('span');
+                text.textContent = file.error;
+                diagnostic.append(text, ' ', exportCopyButton(file.error));
+                item.appendChild(diagnostic);
+            }
             list.appendChild(item);
         }
         for (const notice of data.notices || []) {
@@ -213,7 +237,6 @@
         const previous = window.exportOutcome;
         if (retry && (!previous || !previous.recovery_id)) return;
         exportBusy = true;
-        document.getElementById('export-db-details').open = false;
         const payload = {};
         if (retry) payload.recovery_id = previous.recovery_id;
         if (destination) payload.destination = destination;

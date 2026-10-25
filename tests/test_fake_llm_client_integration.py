@@ -93,3 +93,26 @@ def test_gemini_wrong_shaped_key_must_halt_as_a_credentials_error(
     with pytest.raises(ConfigurationError, match="AUTHENTICATION"):
         client.execute_network_inference([(1, jpeg, "")])
     assert srv.requests, "gemini: the rejection never came from the server"
+
+
+def test_padded_stored_model_and_url_still_reach_the_model(jpeg, tmp_path):
+    from urllib.parse import urlparse
+
+    from config_validator import Settings, _default_provider_configs
+    from fake_llm import make_server
+    from llm_client import LLMClient
+
+    preset = _default_provider_configs()["lm-studio"]
+    srv = make_server("lm-studio").start()
+    try:
+        settings = Settings(
+            ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="lm-studio", LLM_MAX_RETRIES=1,
+            LLM_PROVIDERS={"lm-studio": {
+                "url": f" {srv.base_url.rstrip('/')}{urlparse(preset.url).path} ",
+                "model": f"{preset.model} ",
+            }})
+        outcomes = LLMClient(settings).execute_network_inference([(1, jpeg, "")])
+        assert [o.status for o in outcomes] == ["ok"], [o.error for o in outcomes]
+        assert srv.requests[-1].json["model"] == preset.model
+    finally:
+        srv.stop()

@@ -485,3 +485,27 @@ def test_browse_file_dialog_filters_to_txt(monkeypatch):
     assert file_types[0] == "Text files (*.txt)"
     assert any("(*.*)" in entry for entry in file_types[1:]), \
         "the All-files escape hatch is gone"
+
+
+def test_browse_folder_opens_in_the_folder_the_field_names(monkeypatch, tmp_path):
+    fake_webview = blank_module("webview")
+    fake_webview.FileDialog = types.SimpleNamespace(
+        OPEN=object(), FOLDER=object(), SAVE=object()
+    )
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+    api = main_module.Api()
+    calls = []
+
+    class FakeWindow:
+        def create_file_dialog(self, dialog_type, **kwargs):
+            calls.append((dialog_type, kwargs))
+            return (r"C:\chosen",)
+
+    api._window = FakeWindow()
+    folder = tmp_path / "media folder, 2026"
+    folder.mkdir()
+
+    assert api.browse_folder(str(folder)) == r"C:\chosen"
+    assert api.browse_folder() == r"C:\chosen"
+    assert [dialog for dialog, _ in calls] == [fake_webview.FileDialog.FOLDER] * 2
+    assert [kwargs["directory"] for _, kwargs in calls] == [str(folder), ""]

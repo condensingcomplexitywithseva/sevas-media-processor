@@ -40,17 +40,24 @@ MESSAGE_REFERENCES = {
 
 def message_envelope(payload: dict) -> dict:
     result = dict(payload)
-    raw = str(result.get("message", result.get("error", "")))
+    raw = humanize_paths(str(result.get("message", result.get("error", ""))))
     key = result.get("message_key", "")
     detail = result.get("detail", "")
     if raw.startswith("i18n:"):
         key, _, detail = raw[5:].partition("|")
         raw = ""
-    if detail == result.get("path"):
+    if isinstance(detail, str):
+        detail = humanize_paths(detail)
+    if isinstance(result.get("error"), str):
+        result["error"] = humanize_paths(result["error"])
+    path = result.get("path", "")
+    if isinstance(path, str):
+        path = humanize_paths(path)
+    if detail == path:
         detail = ""
     result.update(status=result.get("status", "error"), message_key=key,
                   message=raw, detail=detail, field=result.get("field"),
-                  path=result.get("path", ""), args=result.get("args", {}),
+                  path=path, args=result.get("args", {}),
                   refs={**MESSAGE_REFERENCES.get(key, {}), **result.get("refs", {})})
     return result
 

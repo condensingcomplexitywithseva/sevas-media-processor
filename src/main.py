@@ -21,7 +21,7 @@ from typing import Any
 import json
 import locale
 
-from fs_utils import get_safe_path
+from fs_utils import path_setting_text, get_safe_path, picker_start_folder
 from user_data import PANIC_LOG_NAME, SETTINGS_FILE_NAME, WEBVIEW_PROFILE_DIR_NAME
 import contextlib
 
@@ -89,7 +89,10 @@ def write_fatal_panic_log(error_details_string: str, app_root: Path | None = Non
             with open(settings_file, encoding="utf-8") as sf:
                 data = json.load(sf)
                 if "OUTPUT_FOLDER_PATH" in data:
-                    output_dir = Path(data["OUTPUT_FOLDER_PATH"]).resolve()
+                    output = data["OUTPUT_FOLDER_PATH"]
+                    if isinstance(output, str):
+                        output = path_setting_text(output)
+                    output_dir = Path(output).resolve()
                     potential_path = output_dir / PANIC_LOG_NAME
                     try:
                         Path(get_safe_path(potential_path.parent)).mkdir(parents=True, exist_ok=True)
@@ -146,10 +149,11 @@ class Api:
     def __init__(self):
         self._window: Any = None
 
-    def browse_folder(self):
+    def browse_folder(self, current=None):
         if self._window:
             import webview
-            result = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+            result = self._window.create_file_dialog(webview.FileDialog.FOLDER,
+                                                     directory=picker_start_folder(current))
             return result[0] if result else None
         return None
 

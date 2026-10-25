@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
 import secrets
 from flask import Flask, render_template, request, jsonify
 from routes.settings_api import api_blueprint
@@ -140,6 +141,7 @@ def create_app():
             env_path=env_path_str,
             log_path=log_path_str,
             settings_path=str(get_settings_path()),
+            working_folder=os.getcwd(),
             initial_errors=initial_errors,
             field_meta=field_meta,
             provider_field_kinds=provider_field_kinds,

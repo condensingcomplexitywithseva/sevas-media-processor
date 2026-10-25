@@ -3,15 +3,18 @@
 
 
 import base64
+import ipaddress
 import json
 import logging
 import math
+import ssl
 import threading
 import time
-import requests
+import requests.adapters
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
+from urllib.parse import urljoin, urlsplit
 import os
 import re
 
@@ -35,6 +38,92 @@ _RETRIED_STATUSES = frozenset({408, 409, 429})
 _JSON_OPENER = re.compile(r"[\[{]")
 
 _MAX_OPENERS_TRIED = 256
+
+
+def system_trust_context() -> ssl.SSLContext:
+    return ssl.create_default_context()
+
+
+class _TrustAdapter(requests.adapters.HTTPAdapter):
+
+    def __init__(self, context: ssl.SSLContext):
+        self._context = context
+        super().__init__()
+
+    def build_connection_pool_key_attributes(self, request: requests.PreparedRequest, verify: Any,
+                                             cert: Any = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        host_params, pool_kwargs = super().build_connection_pool_key_attributes(request, verify, cert)
+        if verify and host_params["scheme"] == "https":
+            pool_kwargs["ssl_context"] = self._context
+        return host_params, pool_kwargs
+
+
+class RedirectWithoutImages(Exception):
+
+    def __init__(self, status_code: int, target: str):
+        super().__init__(f"HTTP {status_code} redirect to {target}")
+        self.status_code = status_code
+        self.target = target
+
+
+class _AISession(requests.Session):
+
+    REDIRECT_LIMIT = 5
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.max_redirects = self.REDIRECT_LIMIT
+
+    def rebuild_method(self, prepared_request: requests.PreparedRequest,
+                       response: requests.Response) -> None:
+        method = prepared_request.method
+        super().rebuild_method(prepared_request, response)
+        if prepared_request.method != method:
+            raise RedirectWithoutImages(response.status_code, str(prepared_request.url))
+
+
+def is_loopback_url(url: str) -> bool:
+    host = urlsplit(url).hostname or ""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _redirect_note(request_num: int, status_code: int, target: str, reason: str = "") -> str:
+    if not target:
+        return f"Request {request_num} Network Failure: HTTP {status_code} redirect without a new address"
+    return (f"Request {request_num} Network Failure: HTTP {status_code} redirect to {target} was not "
+            f"followed{reason}. If that is the AI service's address, put it in the AI URL setting.")
+
+
+_PROXY_SIGN_IN_MSG = ("FATAL PROXY AUTHENTICATION ERROR: the proxy refused to forward the request "
+                      "without sign-in (HTTP 407). Ask your IT department how programs on this "
+                      "computer sign in to the proxy.")
+
+
+def _error_chain(error: BaseException):
+    stack, seen = [error], set()
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        stack.extend(linked for linked in (current.__cause__, current.__context__,
+                                           getattr(current, "reason", None), *current.args)
+                     if isinstance(linked, BaseException))
+
+
+def is_certificate_failure(error: BaseException) -> bool:
+    return any(isinstance(current, ssl.SSLCertVerificationError) for current in _error_chain(error))
+
+
+def is_proxy_sign_in_refusal(error: BaseException) -> bool:
+    return any(isinstance(current, OSError) and str(current).startswith("Tunnel connection failed: 407")
+               for current in _error_chain(error))
 
 
 def dumps_model(value: Any) -> str:
@@ -102,6 +191,8 @@ class LLMClient:
         self.network_timeout_duration_seconds = settings.LLM_TIMEOUT_SECONDS
         self.network_retry_sleep_seconds = settings.LLM_RETRY_SLEEP_SECONDS
         self.halt_batch_on_parse_error = settings.HALT_ON_LLM_PARSE_ERROR
+
+        self.tls_trust = system_trust_context()
 
         self.output_mode = settings.LLM_OUTPUT_MODE
         self.declared_columns = parse_output_columns(settings.LLM_OUTPUT_COLUMNS)
@@ -177,7 +268,9 @@ class LLMClient:
         if abort_flag is not None and abort_flag.is_set():
             raise LLMRequestAbortedByUser("LLM request aborted by user Stop command.")
 
-        session = requests.Session()
+        session = _AISession()
+        session.mount("https://", _TrustAdapter(self.tls_trust))
+        session.trust_env = not is_loopback_url(self.target_endpoint_url)
         outcome = {}
 
         def _do_request():
@@ -318,11 +411,21 @@ class LLMClient:
                     network_client_logger.warning(msg)
                     notes.append(msg)
                     return RequestStatus.ABORTED_BY_USER.value, None, ""
+                except RedirectWithoutImages as redirect:
+                    msg = _redirect_note(request_num, redirect.status_code, redirect.target,
+                                         ": it would resend the request without its images")
+                    network_client_logger.error(msg)
+                    notes.append(msg)
+                    return RequestStatus.NETWORK_FAILURE.value, None, ""
 
                 if response.status_code in (401, 403):
                     msg = f"FATAL AUTHENTICATION ERROR: Server rejected credentials (HTTP {response.status_code})."
                     network_client_logger.critical(msg)
                     raise ConfigurationError(msg)
+
+                if response.status_code == 407:
+                    network_client_logger.critical(_PROXY_SIGN_IN_MSG)
+                    raise ConfigurationError(_PROXY_SIGN_IN_MSG)
 
                 if response.status_code == 400 and "API_KEY_INVALID" in response.text:
                     msg = "FATAL AUTHENTICATION ERROR: Server rejected credentials (HTTP 400, API_KEY_INVALID)."
@@ -330,6 +433,16 @@ class LLMClient:
                     raise ConfigurationError(msg)
 
                 status_code = response.status_code
+                if 300 <= status_code < 400:
+                    location = response.headers.get("Location", "")
+                    msg = _redirect_note(request_num, status_code,
+                                         urljoin(response.url, location) if location else "")
+                    with contextlib.suppress(Exception):
+                        msg += f" | Server Response Body: {response.text}"
+                    network_client_logger.error(msg)
+                    notes.append(msg)
+                    return RequestStatus.NETWORK_FAILURE.value, None, ""
+
                 if 400 <= status_code < 500 and status_code not in _RETRIED_STATUSES:
                     details = f"HTTP {status_code} rejected by the server"
                     with contextlib.suppress(Exception):
@@ -347,6 +460,12 @@ class LLMClient:
                         f"Unreadable reply body: {depth_error}") from depth_error
                 return RequestStatus.OK.value, parsed_reply, response.text
 
+            except requests.exceptions.TooManyRedirects:
+                msg = (f"Request {request_num} Network Failure: more than {_AISession.REDIRECT_LIMIT} "
+                       f"redirects in a row; the server's addresses send the request on in a loop.")
+                network_client_logger.error(msg)
+                notes.append(msg)
+                return RequestStatus.NETWORK_FAILURE.value, None, ""
             except requests.exceptions.RequestException as net_err:
                 details = str(net_err)
                 err_response = getattr(net_err, "response", None)
@@ -354,6 +473,16 @@ class LLMClient:
                 if err_response is not None:
                     with contextlib.suppress(Exception):
                         details += f" | Server Response Body: {err_response.text}"
+
+                if is_certificate_failure(net_err):
+                    msg = (f"Request {request_num} Network Failure: {details} | The server's certificate "
+                           f"is not trusted. If this computer is on a network that inspects HTTPS "
+                           f"traffic, such as a corporate one, IT installs its root certificate in Windows.")
+                    network_client_logger.critical(msg)
+                    raise ConfigurationError(msg) from net_err
+                if is_proxy_sign_in_refusal(net_err):
+                    network_client_logger.critical(_PROXY_SIGN_IN_MSG)
+                    raise ConfigurationError(_PROXY_SIGN_IN_MSG) from net_err
 
                 network_client_logger.warning(f"Network attempt {attempt} failed for request {request_num}: {details}")
 

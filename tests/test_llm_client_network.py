@@ -14,12 +14,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import requests
 from PIL import Image
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+import llm_client
 from config_validator import _default_provider_configs
 from llm_client import LLMClient
 from schemas import ConfigurationError
@@ -146,7 +148,50 @@ def test_abortable_sleep_interrupts_within_a_tick(server):
     elapsed = time.perf_counter() - started
 
     assert interrupted is True
-    assert elapsed < 1.5
+    assert elapsed < 3.0
+
+
+
+def test_retry_pause_checks_stop_at_least_every_half_second(server, monkeypatch):
+    client = make_wire_client(server)
+    now = [0.0]
+    waits = []
+    flag = threading.Event()
+    stop_at = [float("inf")]
+
+    def sleep(seconds):
+        waits.append(seconds)
+        now[0] += seconds
+        if now[0] >= stop_at[0]:
+            flag.set()
+
+    monkeypatch.setattr(llm_client, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=sleep))
+
+    assert client._abortable_sleep(10, flag) is False
+    assert max(waits) <= 0.5 and sum(waits) == pytest.approx(10)
+
+    now[0], waits[:], stop_at[0] = 0.0, [], 3.2
+    assert client._abortable_sleep(10, flag) is True
+    assert max(waits) <= 0.5
+    assert now[0] - 3.2 <= 0.5, f"Stop noticed {now[0] - 3.2:.2f} s after it was set"
+
+
+def test_stop_during_a_request_is_checked_at_least_every_half_second(server, jpegs, monkeypatch):
+    server.queue(stall=True)
+    client = make_wire_client(server, LLM_TIMEOUT_SECONDS=30)
+    joins = []
+
+    class RecordingThread(threading.Thread):
+        def join(self, timeout=None):
+            joins.append(timeout)
+            super().join(timeout)
+
+    monkeypatch.setattr(llm_client, "threading", SimpleNamespace(Thread=RecordingThread))
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]), abort_flag=flag_after(0.3))
+
+    assert [o.status for o in outcomes] == ["aborted_by_user"]
+    assert joins and all(timeout is not None and 0 < timeout <= 0.5 for timeout in joins), joins
 
 
 
@@ -577,6 +622,159 @@ def test_timeout_and_conflict_statuses_are_retried(server, jpegs, status_code):
 
     assert [o.status for o in outcomes] == ["ok"]
     assert len(server.requests) == 2
+
+
+
+@pytest.fixture
+def second_server():
+    srv = FakeLLMServer().start()
+    yield srv
+    srv.stop()
+
+
+@pytest.mark.parametrize("status_code", [307, 308])
+def test_a_redirect_that_keeps_the_request_is_followed(server, second_server, jpegs, status_code):
+    server.queue(status=status_code, headers={"Location": second_server.url})
+    client = make_wire_client(server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:2]))
+
+    assert [o.status for o in outcomes] == ["ok"]
+    assert [r.method for r in second_server.requests] == ["POST"]
+    assert second_server.requests[0].body_bytes == server.requests[0].body_bytes
+
+
+@pytest.mark.parametrize("status_code", [301, 302, 303])
+def test_a_redirect_that_would_drop_the_images_is_not_followed(server, second_server, jpegs, status_code):
+    server.queue(status=status_code, headers={"Location": second_server.url})
+    client = make_wire_client(server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:2]))
+
+    assert second_server.requests == []
+    assert len(server.requests) == 1
+    assert [o.status for o in outcomes] == ["network_failure"]
+    assert (f"HTTP {status_code} redirect to {second_server.url} was not followed: it would "
+            f"resend the request without its images") in outcomes[0].error
+    assert "AI URL setting" in outcomes[0].error
+
+
+def test_the_second_server_is_reached_when_redirects_are_followed_as_requests_does(server, second_server):
+    server.queue(status=302, headers={"Location": second_server.url})
+
+    reply = requests.post(server.url, json={"images": "x"}, timeout=15)
+
+    assert reply.status_code == 200
+    assert [r.method for r in second_server.requests] == ["GET"]
+
+
+def test_a_relative_redirect_names_the_absolute_address(server, jpegs):
+    server.queue(status=301, headers={"Location": "/v2/chat/completions"})
+    client = make_wire_client(server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]))
+
+    assert f"redirect to {server.base_url}/v2/chat/completions was not followed" in outcomes[0].error
+
+
+def test_a_redirect_loop_stops_after_five_hops_and_is_not_retried(server, second_server, jpegs):
+    server.default_behavior = {"status": 307, "headers": {"Location": second_server.url}}
+    second_server.default_behavior = {"status": 307, "headers": {"Location": server.url}}
+    client = make_wire_client(server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]))
+
+    assert len(server.requests) + len(second_server.requests) == 6
+    assert [o.status for o in outcomes] == ["network_failure"]
+    assert "more than 5 redirects in a row" in outcomes[0].error
+
+
+@pytest.mark.parametrize("status_code, location", [(300, "/choices"), (302, None)])
+def test_an_unfollowable_redirect_is_recorded_once(server, jpegs, status_code, location):
+    server.queue(status=status_code, headers={"Location": location} if location else None,
+                 json={"note": "moved"})
+    client = make_wire_client(server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]))
+
+    assert len(server.requests) == 1
+    assert [o.status for o in outcomes] == ["network_failure"]
+    expected = (f"HTTP {status_code} redirect to {server.base_url}{location} was not followed"
+                if location else f"HTTP {status_code} redirect without a new address")
+    assert expected in outcomes[0].error
+    assert '"note"' in outcomes[0].error
+
+
+
+_PROXY_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                    "http_proxy", "https_proxy", "all_proxy", "no_proxy")
+
+
+@pytest.fixture
+def proxy(monkeypatch):
+    for name in _PROXY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    srv = FakeLLMServer().start()
+    yield srv
+    srv.stop()
+
+
+@pytest.mark.parametrize("url, loopback", [
+    ("http://localhost:11434/v1/chat/completions", True),
+    ("http://LOCALHOST:1234/v1", True),
+    ("http://127.0.0.1:1234/v1", True),
+    ("http://127.8.9.10/v1", True),
+    ("http://[::1]:1234/v1", True),
+    ("https://api.openai.com/v1/chat/completions", False),
+    ("http://ai.example.test/v1", False),
+    ("http://10.0.0.5:8080/v1", False),
+    ("http://localhost.example.test/v1", False),
+    ("", False),
+])
+def test_loopback_addresses_are_recognised(url, loopback):
+    assert llm_client.is_loopback_url(url) is loopback
+
+
+def test_a_local_provider_bypasses_a_proxy_variable(server, proxy, jpegs, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", proxy.base_url)
+    client = make_wire_client(server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]))
+
+    assert [o.status for o in outcomes] == ["ok"]
+    assert len(server.requests) == 1
+    assert proxy.requests == []
+
+
+def test_another_computer_is_still_reached_through_the_proxy_variable(proxy, jpegs, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", proxy.base_url)
+    client = make_wire_client(SimpleNamespace(url="http://ai.example.test/v1/chat/completions"))
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]))
+
+    assert [o.status for o in outcomes] == ["ok"]
+    assert len(proxy.requests) == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows proxy setting is read from the registry")
+@pytest.mark.parametrize("url, through_proxy", [
+    (None, False),
+    ("http://ai.example.test/v1/chat/completions", True),
+])
+def test_the_windows_proxy_setting_skips_a_local_provider(server, proxy, jpegs, monkeypatch, url, through_proxy):
+    import winreg
+    real_query = winreg.QueryValueEx
+    fake = {"ProxyEnable": (1, winreg.REG_DWORD), "ProxyOverride": ("<local>", winreg.REG_SZ),
+            "ProxyServer": (f"127.0.0.1:{proxy.port}", winreg.REG_SZ)}
+    monkeypatch.setattr(winreg, "QueryValueEx",
+                        lambda key, name: fake[name] if name in fake else real_query(key, name))
+    client = make_wire_client(SimpleNamespace(url=url) if url else server)
+
+    outcomes = client.execute_network_inference(pages(jpegs[:1]))
+
+    assert [o.status for o in outcomes] == ["ok"]
+    assert len(proxy.requests) == (1 if through_proxy else 0)
+    assert len(server.requests) == (0 if through_proxy else 1)
 
 
 def test_multi_megabyte_answer_with_unicode_survives_intact(server, jpegs):

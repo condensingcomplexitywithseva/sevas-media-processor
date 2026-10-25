@@ -18,8 +18,9 @@ free local model in Ollama or LM Studio.
 Not interested in AI? Switch it off and it is a bulk converter: iPhone HEICs,
 videos, GIFs and PDFs all become clean, uniform JPEGs.
 
-Everything runs on your own machine. Nothing leaves it unless you turn the AI
-on and tell it where to send the images.
+Everything runs on your own machine. Your files, and everything the app makes
+from them, stay on it unless you turn the AI on and tell it where to send the
+images.
 
 This is a local Windows desktop application: it runs on Windows 10 and 11
 only.
@@ -27,13 +28,24 @@ only.
 (Reviewing this for an IT department? The network and data answers, and what
 the installer does, are in SECURITY.md.)
 
-## Work in progress
+## Status and support
 
-Current version: v0.4.0
+Current version: v1.0.0
 
-This is a 0.x application under active development. Interfaces, settings,
-and outputs may change between versions. Feedback is welcome; no support
-and no publishing schedule are promised.
+Seva's Media Processor is free, open-source software maintained by one
+person, without paid support or a fixed release schedule. Each release
+passes the project's automated tests and a check of every library in
+`requirements.lock` against published security advisories.
+
+The update steps below keep your settings and your input and output
+folders. Report columns, output file names and the window's layout can
+change in a new minor version. After an update, a run made with the
+earlier version may not be continued: the next run then starts afresh,
+and the earlier results are kept in an archive folder.
+
+Questions, bugs and suggestions: open an issue on this project's GitHub
+page. Security problems: use "Report a vulnerability" on its Security tab,
+which keeps the report private.
 
 ## What file types it accepts
 
@@ -93,34 +105,46 @@ The setup script is the file `install.txt` in the extracted folder
    paste the text.
 6. If a warning says the text contains multiple lines or is very large,
    click "Paste anyway".
-7. Press Enter.
+7. If the window shows "Press Enter to start the setup.", press Enter.
 8. When the window asks for `install.txt`, drag `install.txt` from the
    extracted folder (`sevas-media-processor-main`) into the PowerShell
    window, then press Enter.
+9. When the window asks a question, type the number of your answer, then
+   press Enter.
 
 What the setup script does:
 
-1. Verifies Python. If there is none, it installs Python 3.14 for your user
-   account using winget and carries on; if it finds an older or newer
-   Python, it asks you first.
-2. Creates a "venv" (Virtual Environment) folder, so the libraries install
-   into it rather than into the machine's Python.
-3. Downloads the required third-party libraries into that virtual environment.
-4. Creates the `input` and `output` folders and your `settings.json`
+1. Looks for Python 3.13 or 3.14. If it finds neither, it asks you to
+   choose: install Python 3.14 for your Windows user from the internet
+   (with winget), or stop so that you can install Python yourself or ask
+   your IT department. With a Python newer than 3.14 you may also continue
+   at your own risk.
+2. Asks where the libraries should come from: the internet (pypi.org), or
+   your organisation's package mirror. With a mirror, only the mirror is
+   used; if a library is missing there, the setup stops. The mirror also
+   needs `setuptools`, which pip uses to build one of the libraries.
+3. Creates a "venv" (Virtual Environment) folder, so the libraries install
+   into it rather than into the machine's Python. If an existing one can no
+   longer start, for example because its Python was uninstalled, it is
+   built again.
+4. Installs the required third-party libraries into that virtual environment.
+5. Creates the `input` and `output` folders and your `settings.json`
    (a copy of `settings.example.json`).
-5. Creates a Desktop shortcut.
+6. Creates a Desktop shortcut.
 
 ### Option 2: Manual Setup
 
-1. Download and install Python 3.14 from: https://www.python.org/downloads/
-   If you already have Python 3.14, you can skip this step. Newer versions are untested.
+1. Install Python 3.13 or 3.14. To get it from python.org, open
+   https://www.python.org/downloads/windows/ and choose the
+   "Windows installer (64-bit)" of the latest Python 3.14 release.
+   If you already have Python 3.13 or 3.14, you can skip this step. Other versions are untested.
    CRITICAL: During installation, you MUST check the box at the bottom that says "Add python.exe to PATH".
 2. Open the extracted folder (`sevas-media-processor-main`).
 3. Hold down Shift on your keyboard and Right-Click any empty space inside the folder.
 4. Click "Open PowerShell window here" or "Open in Terminal".
 5. Type this and press Enter to create a virtual environment: `python -m venv venv`
 6. Type one of these two lines and press Enter to install the dependencies.
-   With Python 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
+   With Python 3.13 or 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
    With any other Python version: `.\venv\Scripts\python.exe -m pip install -r requirements_no_version.txt`
 7. Create two folders named `input` and `output` inside the extracted folder
    (Right-click > New > Folder). Files you put in `input` are what the application processes;
@@ -137,11 +161,11 @@ What the setup script does:
 
 ## What will be installed
 
-*   Python 3.14: A popular programming language powering the application.
-*   av (18.0.0): The Python interface for FFmpeg. This is the core engine used to analyze, decode, extract, and process video and audio files.
+*   Python 3.13 or 3.14: A popular programming language powering the application.
+*   av (18.0.0): The Python interface for FFmpeg. It is the engine the application uses to read video files and extract frames from them.
 *   numpy (2.5.2): A foundational math library. It handles massive, high-speed number crunching, which is essential for manipulating the raw pixel data inside images and video frames.
 *   openpyxl (3.1.5): A specialized tool used for reading, writing, and modifying modern Microsoft Excel spreadsheets (.xlsx files).
-*   pillow (12.3.0): The standard Python imaging library. It is used to open, crop, resize, filter, and save standard image files like JPEGs and PNGs.
+*   pillow (13.0.0): The standard Python imaging library. It is used to open, crop, resize, filter, and save standard image files like JPEGs and PNGs.
 *   pillow-avif-plugin (1.6.0): An add-on for Pillow that allows the application to read and write AVIF files, a modern, highly compressed web image format.
 *   pillow_heif (1.5.0): Another Pillow add-on that enables support for HEIC/HEIF images. This is crucial for processing the default, high-efficiency photos taken by iPhones.
 *   pydantic (2.13.4): A strict data validation tool. It acts as a gatekeeper, ensuring that any information the application processes is formatted exactly as expected to prevent bugs and crashes.
@@ -151,14 +175,14 @@ What the setup script does:
 *   Flask (3.1.3): a lightweight WSGI web application framework.
 *   pywebview (6.2.1): A lightweight wrapper that gives the application its native desktop window, through the WebView2 runtime built into Windows, instead of relying on a standard web browser.
 *   SQLAlchemy (2.0.51): The database engine that sqlmodel is built on. The application talks to it directly for the parts of saving and retrieving records that sqlmodel does not cover.
-*   Werkzeug (3.1.8): The web-server machinery that Flask is built on. The application uses it to start its own small server on a private port that only your own computer can reach.
+*   Werkzeug (3.1.9): The web-server machinery that Flask is built on. The application uses it to start its own small server on a private port that only your own computer can reach.
 *   pythonnet (3.1.0, Windows only): A bridge to the .NET libraries built into Windows. It does one cosmetic job here: putting the application's icon on the window title bar and the taskbar button.
 
 Each of the libraries above relies on supporting libraries of its own, which
 the installer fetches automatically - about twenty more. The file
 requirements.lock lists every single package the install puts on your machine,
-with the exact version of each - on the tested Python (3.14). If you chose to
-proceed on an older or newer Python instead, the installer says so and
+with the exact version of each - on the tested Pythons (3.13 and 3.14). If you
+chose to continue on a newer Python instead, the installer says so and
 installs unpinned versions, which the lock file does not describe.
 
 ## Updating to a new version
@@ -201,10 +225,12 @@ commands yourself.
     paste the text.
 12. If a warning says the text contains multiple lines or is very large,
     click "Paste anyway".
-13. Press Enter.
+13. If the window shows "Press Enter to start the setup.", press Enter.
 14. When the window asks for `install.txt`, drag `install.txt` from the new
     folder into the PowerShell window, then press Enter.
-15. Launch the application from the Desktop shortcut. Once it works,
+15. When the window asks a question, type the number of your answer, then
+    press Enter.
+16. Launch the application from the Desktop shortcut. Once it works,
     delete the old folder.
 
 ### Update by hand
@@ -230,7 +256,7 @@ commands yourself.
 9. Click "Open PowerShell window here" or "Open in Terminal".
 10. Type this and press Enter to create a virtual environment: `python -m venv venv`
 11. Type one of these two lines and press Enter to install the dependencies.
-    With Python 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
+    With Python 3.13 or 3.14: `.\venv\Scripts\python.exe -m pip install -r requirements.lock`
     With any other Python version: `.\venv\Scripts\python.exe -m pip install -r requirements_no_version.txt`
 12. Launch the application from the Desktop shortcut. Once it works,
     delete the old folder.
@@ -240,13 +266,14 @@ If you cloned with git: `git pull`, delete the `venv` folder, then paste
 
 ## Your data and the network
 
-Seva's Media Processor runs fully offline. The AI feature is switched OFF by default,
-and the application makes no network connections of its own - no telemetry, no
-update checks, no analytics, no crash reporting.
+The AI feature is switched OFF by default, and the application makes no network
+connections of its own - no telemetry, no update checks, no analytics, no crash
+reporting. Its window is Windows' built-in WebView2, which talks to Microsoft on
+its own, as in any program that uses it.
 
-When you do switch the AI feature on, the only outbound traffic is to the AI
-endpoint YOU configure in the settings, and it carries only the images being
-processed plus your prompt. If you would rather nothing left the machine at
+When you do switch the AI feature on, the application sends only the images being
+processed plus your prompt, and only to the AI endpoint YOU configure in the
+settings. If you would rather nothing left the machine at
 all, point it at Ollama or LM Studio running on your own computer - both are
 built-in choices. The "custom" provider can point at any other endpoint,
 such as an internal AI gateway.

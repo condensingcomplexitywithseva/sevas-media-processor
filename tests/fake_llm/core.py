@@ -177,8 +177,7 @@ class ProviderServer:
     def json_response(self, obj: Any, status: int = 200,
                       headers: dict | None = None) -> Response:
         body = json.dumps(obj, ensure_ascii=False)
-        resp = Response(body, status=status)
-        resp.headers["Content-Type"] = "application/json"
+        resp = Response(body, status=status, mimetype="application/json")
         self._decorate(resp)
         if headers:
             resp.headers.update(headers)

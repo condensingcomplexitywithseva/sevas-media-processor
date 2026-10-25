@@ -413,7 +413,6 @@
         body [class].ui-export-button { padding: 10px 20px; font-size: 1em; font-weight: bold; cursor: pointer; background-color: #fff; border: 1px solid var(--border-color); border-radius: 4px; }
         body [class].ui-result { max-width: 100%; overflow-wrap: anywhere; }
         body [class].ui-recovery-actions { gap: 8px; margin: 12px 0; flex-wrap: wrap; }
-        body [class].ui-disclosure { cursor: pointer; }
         body [class].ui-file-list { margin: 6px 0; padding-left: 20px; }
         body [class].ui-location { background-color: #e9ecef; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; user-select: all; word-break: break-all; }
         body [class].ui-copy-button { padding: 2px 8px; font-size: 0.85em; vertical-align: middle; }
@@ -446,6 +445,7 @@
         window.FIELD_META = {{ field_meta | tojson }};
         window.MESSAGE_REFERENCES = {{ message_references | tojson }};
         window.PROVIDER_FIELD_KINDS = {{ provider_field_kinds | tojson }};
+        window.WORKING_FOLDER = {{ working_folder | tojson }};
 
         window.API_TOKEN = null;
         window.__apiTokenReady = new Promise(function (resolve) {

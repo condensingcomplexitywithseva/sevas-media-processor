@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -359,70 +360,165 @@ def test_export_success_writes_files_and_releases_the_db(api, tmp_path):
 
 @pytest.fixture(autouse=True)
 def explorer_spy(monkeypatch):
-    import routes.export_api as export_api
+    import windows_shell
 
     seen = []
-    monkeypatch.setattr(export_api.subprocess, "Popen",
-                        lambda cmd, *a, **k: seen.append(cmd))
+
+    def record(path):
+        seen.append(path)
+        return True
+
+    monkeypatch.setattr(windows_shell, "show_in_explorer", record)
     return seen
 
 
-def test_db_export_reveals_the_xlsx_in_explorer(api, tmp_path, explorer_spy):
-    db_path = tech_folder_path(tmp_path / "output") / "application_state.db"
+def shown_path(path) -> Path:
+    text = str(path)
+    assert not text.startswith("\\\\?\\"), f"machine spelling reaches Explorer: {text}"
+    assert Path(text).is_absolute(), f"relative path reaches Explorer: {text}"
+    assert Path(text).exists(), f"Explorer would be asked to show a missing item: {text}"
+    return Path(text)
+
+
+AWKWARD = "out put, 2026 & co"
+
+
+@pytest.mark.parametrize("folder", ["output", AWKWARD])
+def test_db_export_reveals_the_xlsx_in_explorer(api, tmp_path, explorer_spy, folder):
+    db_path = tech_folder_path(tmp_path / folder) / "application_state.db"
     db_path.parent.mkdir(parents=True)
     controller = SQLiteDatabaseController(db_path)
     controller.record_run_configuration(False, "", ())
     controller.close()
 
-    client = api().test_client()
+    client = api(OUTPUT_FOLDER_PATH=str(tmp_path / folder)).test_client()
     response = client.post("/api/export/database", headers=AUTH)
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["revealed"] is True
 
     assert len(explorer_spy) == 1
-    executable, argument = explorer_spy[0][0], explorer_spy[0][1]
-    assert Path(executable).is_absolute(), f"bare name is plantable: {executable}"
-    assert Path(executable).name.lower() == "explorer.exe"
-    revealed = Path(argument.removeprefix("/select,"))
-    assert revealed.parent == tmp_path / "output" / "exports"
+    revealed = shown_path(explorer_spy[0])
+    assert revealed.parent == tmp_path / folder / "exports"
     assert revealed.name.startswith("database_export_") and revealed.suffix == ".xlsx"
 
 
-def test_log_export_reveals_the_exported_file_in_explorer(api, tmp_path, explorer_spy):
+def _seed_exportable_run(output):
+    db_path = tech_folder_path(output) / "application_state.db"
+    db_path.parent.mkdir(parents=True)
+    controller = SQLiteDatabaseController(db_path)
+    controller.record_run_configuration(False, "", ())
+    controller.close()
+
+
+def _start_while_explorer_waits(monkeypatch, *, revealed=True):
+    import routes.execution_api as exec_api
+    import routes.export_api as export_api
+    import windows_shell
+
+    seen = {}
+
+    def start_like_thread():
+        lock = exec_api.run_controller.lock
+        seen["lock_free"] = lock.acquire(timeout=2)
+        if seen["lock_free"]:
+            try:
+                seen["barrier"] = export_api.advance_export_revision()
+            finally:
+                lock.release()
+
+    def slow_explorer(path):
+        probe = threading.Thread(target=start_like_thread)
+        probe.start()
+        probe.join(5)
+        seen["shown"] = path
+        return revealed
+
+    monkeypatch.setattr(windows_shell, "show_in_explorer", slow_explorer)
+    return seen
+
+
+@pytest.mark.parametrize("revealed", [True, False])
+def test_the_database_export_shows_its_workbook_after_releasing_the_run_lock(api, tmp_path, monkeypatch, revealed):
+    _seed_exportable_run(tmp_path / "output")
+    seen = _start_while_explorer_waits(monkeypatch, revealed=revealed)
+
+    response = api().test_client().post("/api/export/database", headers=AUTH)
+    assert response.status_code == 200, response.get_json()
+    body = response.get_json()
+    assert seen["lock_free"], "the run lock is still held while Explorer is asked to show the workbook"
+    assert body["export_revision"] < seen["barrier"]
+    assert body["revealed"] is revealed
+    assert Path(seen["shown"]).suffix == ".xlsx"
+
+
+def test_a_lost_reveal_still_releases_the_run_lock_and_answers(api, tmp_path, monkeypatch):
+    import routes.execution_api as exec_api
+    import windows_shell
+
+    def broken(path):
+        raise OSError(5, "Explorer is gone")
+
+    _seed_exportable_run(tmp_path / "output")
+    monkeypatch.setattr(windows_shell, "show_in_explorer", broken)
+    response = api().test_client().post("/api/export/database", headers=AUTH)
+    assert response.status_code == 200 and response.get_json()["revealed"] is False
+    assert exec_api.run_controller.lock.acquire(blocking=False)
+    exec_api.run_controller.lock.release()
+
+
+@pytest.mark.parametrize("folder", ["output", AWKWARD])
+def test_log_export_reveals_the_exported_file_in_explorer(api, tmp_path, explorer_spy, folder):
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
     (logs_dir / "system_log_2026-07-05.txt").write_text("lines", encoding="utf-8")
 
-    client = api().test_client()
+    client = api(OUTPUT_FOLDER_PATH=str(tmp_path / folder)).test_client()
     response = client.post("/api/export/logs", headers=AUTH)
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["revealed"] is True
 
-    expected = tmp_path / "output" / "exports" / "system_log_2026-07-05.txt"
-    assert explorer_spy[0][1] == "/select," + str(expected)
+    expected = tmp_path / folder / "exports" / "system_log_2026-07-05.txt"
+    assert explorer_spy == [expected]
+    shown_path(explorer_spy[0])
 
 
-def test_open_logs_folder_opens_the_folder_not_a_selection(api, tmp_path, explorer_spy):
-    (tmp_path / "logs").mkdir()
+@pytest.mark.parametrize("folder", ["logs", AWKWARD])
+def test_open_logs_folder_shows_the_logs_with_the_newest_selected(api, tmp_path, explorer_spy, folder):
+    app_data = tmp_path if folder == "logs" else tmp_path / folder
+    logs = app_data / "logs"
+    logs.mkdir(parents=True)
+    for day, age in (("2026-10-23", 300), ("2026-10-25", 100), ("2026-10-24", 200)):
+        log = logs / f"system_log_{day}.txt"
+        log.write_text("lines", encoding="utf-8")
+        os.utime(log, (time.time() - age, time.time() - age))
+    (logs / "notes.txt").write_text("not a log", encoding="utf-8")
+    app = api()
+    api.mgr.app_data_dir = app_data
 
-    client = api().test_client()
-    response = client.post("/api/export/open_logs_folder", headers=AUTH)
+    response = app.test_client().post("/api/export/open_logs_folder", headers=AUTH)
     assert response.status_code == 200, response.get_json()
 
-    assert len(explorer_spy) == 1
-    executable, argument = explorer_spy[0][0], explorer_spy[0][1]
-    assert Path(executable).is_absolute(), f"bare name is plantable: {executable}"
-    assert Path(executable).name.lower() == "explorer.exe"
-    assert argument == str(tmp_path / "logs")
+    assert explorer_spy == [logs / "system_log_2026-10-25.txt"]
 
 
-def test_open_logs_folder_reports_failure_with_a_translatable_key(api, tmp_path, monkeypatch):
-    import routes.export_api as export_api
+def test_open_logs_folder_without_a_log_shows_the_folder_in_its_parent(api, tmp_path, explorer_spy):
+    (tmp_path / "logs").mkdir()
 
-    def no_explorer(*args, **kwargs):
-        raise FileNotFoundError(2, "no explorer here")
+    response = api().test_client().post("/api/export/open_logs_folder", headers=AUTH)
+    assert response.status_code == 200, response.get_json()
+    assert explorer_spy == [tmp_path / "logs"]
 
-    monkeypatch.setattr(export_api.subprocess, "Popen", no_explorer)
+
+@pytest.mark.parametrize("failure", ["refused", "raised"])
+def test_open_logs_folder_reports_failure_with_a_translatable_key(api, tmp_path, monkeypatch, failure):
+    import windows_shell
+
+    def no_explorer(path):
+        if failure == "raised":
+            raise OSError(2, "no explorer here")
+        return False
+
+    monkeypatch.setattr(windows_shell, "show_in_explorer", no_explorer)
     (tmp_path / "logs").mkdir()
 
     client = api().test_client()
@@ -439,13 +535,16 @@ def test_open_logs_folder_without_a_logs_folder_is_404(api, explorer_spy):
     assert explorer_spy == []
 
 
-def test_a_missing_explorer_never_turns_a_green_export_red(api, tmp_path, monkeypatch):
-    import routes.export_api as export_api
+@pytest.mark.parametrize("failure", ["refused", "raised"])
+def test_a_missing_explorer_never_turns_a_green_export_red(api, tmp_path, monkeypatch, failure):
+    import windows_shell
 
-    def no_explorer(*args, **kwargs):
-        raise FileNotFoundError(2, "no explorer here")
+    def no_explorer(path):
+        if failure == "raised":
+            raise OSError(2, "no explorer here")
+        return False
 
-    monkeypatch.setattr(export_api.subprocess, "Popen", no_explorer)
+    monkeypatch.setattr(windows_shell, "show_in_explorer", no_explorer)
 
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
@@ -494,6 +593,40 @@ def test_log_export_copies_the_newest_log_and_returns_its_path(api, tmp_path):
     assert exported.read_text(encoding="utf-8") == "current session lines"
     assert response.get_json()["path"] == str(exported)
     assert newest.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the long-path prefix is Windows-only")
+def test_route_messages_lose_machine_path_syntax_at_the_envelope(api, tmp_path, monkeypatch):
+    import schemas
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "system_log_2026-07-05.txt").write_text("lines", encoding="utf-8")
+    (tmp_path / "output").mkdir(exist_ok=True)
+    (tmp_path / "output" / "exports").write_text("not a folder", encoding="utf-8")
+    client = api().test_client()
+
+    def message():
+        response = client.post("/api/export/logs", headers=AUTH)
+        assert response.status_code == 500
+        return response.get_json()["message"]
+
+    shown = message()
+    assert str(tmp_path / "output" / "exports") in shown, shown
+    assert "\\\\" not in shown, shown
+    monkeypatch.setattr(schemas, "humanize_paths", lambda text: text)
+    assert "\\\\?\\" in message()
+
+
+def test_message_envelope_rewrites_machine_paths_and_keeps_literal_text():
+    from schemas import message_envelope
+    leaked = "[WinError 3] The system cannot find the path specified: '\\\\\\\\?\\\\Z:\\\\reports'"
+    plain = "[WinError 3] The system cannot find the path specified: 'Z:\\reports'"
+    data = message_envelope({"message": leaked, "detail": leaked, "path": "\\\\?\\UNC\\srv\\share"})
+    assert data["message"] == data["detail"] == plain
+    assert data["path"] == "\\\\srv\\share"
+    assert message_envelope({"error": leaked})["error"] == plain
+    literal = '<img src=x> \\\\nas\\share {output}'
+    assert message_envelope({"message": literal, "detail": literal})["detail"] == literal
 
 
 def test_log_export_works_while_the_log_is_still_open_for_writing(api, tmp_path):
@@ -586,6 +719,63 @@ def test_commit_still_works_on_a_readable_file(api, tmp_path):
     assert on_disk["JPEG_QUALITY"] == 55
 
 
+@pytest.mark.parametrize("ai_enabled", [True, False])
+def test_apply_saves_single_line_settings_without_surrounding_spaces(api, tmp_path, ai_enabled):
+    dormant = {"model": "gpt-5.6 "}
+    client = api(ENABLE_LLM_INFERENCE=ai_enabled, LLM_PROVIDER="lm-studio",
+                 LLM_PROVIDERS={"openai": dormant}).test_client()
+    edits = {
+        "LLM_PROVIDERS.lm-studio.model": "provider/model ",
+        "LLM_PROVIDERS.lm-studio.url": " http://localhost:1234/v1/chat/completions ",
+        "LLM_PROVIDERS.lm-studio.extra_header_key": " x-key ",
+        "LLM_PROVIDERS.lm-studio.response_extraction_path": "choices[0].message.content\t",
+        "INPUT_FOLDER_PATH": f" {tmp_path / 'input'} ",
+        "OUTPUT_FOLDER_PATH": f"{tmp_path / 'output'} ",
+    }
+    response = client.post("/api/settings/commit", json={"edits": edits}, headers=AUTH)
+    assert response.status_code == 200, response.get_json()
+
+    on_disk = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert on_disk["INPUT_FOLDER_PATH"] == str(tmp_path / "input")
+    assert on_disk["OUTPUT_FOLDER_PATH"] == str(tmp_path / "output")
+    assert on_disk["LLM_PROVIDERS"]["openai"] == dormant
+    saved = on_disk["LLM_PROVIDERS"]["lm-studio"]
+    sent = {name.rsplit(".", 1)[1]: value for name, value in edits.items() if "." in name}
+    expected = {field: value.strip() if ai_enabled else value for field, value in sent.items()}
+    assert {field: saved[field] for field in sent} == expected
+
+
+def test_apply_saves_folders_pasted_with_copy_as_path_without_the_quotes(api, tmp_path):
+    client = api().test_client()
+    edits = {"INPUT_FOLDER_PATH": f'"{tmp_path / "input"}"',
+             "OUTPUT_FOLDER_PATH": f' "{tmp_path / "out put"}" '}
+    response = client.post("/api/settings/commit", json={"edits": edits}, headers=AUTH)
+    assert response.status_code == 200, response.get_json()
+    on_disk = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert (on_disk["INPUT_FOLDER_PATH"], on_disk["OUTPUT_FOLDER_PATH"]) == \
+        (str(tmp_path / "input"), str(tmp_path / "out put"))
+
+
+def test_log_export_reads_a_quoted_output_folder_setting(api, tmp_path, explorer_spy):
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "system_log_2026-07-05.txt").write_text("lines", encoding="utf-8")
+    client = api(OUTPUT_FOLDER_PATH=f'"{tmp_path / "output"}"').test_client()
+    response = client.post("/api/export/logs", headers=AUTH)
+    assert response.status_code == 200, response.get_json()
+    assert (tmp_path / "output" / "exports" / "system_log_2026-07-05.txt").is_file()
+
+
+def test_log_export_reads_a_padded_output_folder_setting_without_the_spaces(api, tmp_path, explorer_spy):
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "system_log_2026-07-05.txt").write_text("lines", encoding="utf-8")
+
+    client = api(OUTPUT_FOLDER_PATH=f"{tmp_path / 'output'} ").test_client()
+    response = client.post("/api/export/logs", headers=AUTH)
+    assert response.status_code == 200, response.get_json()
+    assert (tmp_path / "output" / "exports" / "system_log_2026-07-05.txt").is_file()
+    assert not [p.name for p in tmp_path.iterdir() if p.name != p.name.rstrip()]
+
+
 
 def test_open_file_spawns_notepad_by_absolute_path(api, tmp_path, monkeypatch):
     import routes.settings_api as settings_api
@@ -626,6 +816,57 @@ def test_open_file_offers_the_backup_beside_the_active_settings(api, tmp_path,
 
     assert response.status_code == 200, response.get_json()
     assert Path(spawned[0][1]) == backup
+
+
+@pytest.fixture
+def one_second(monkeypatch):
+    import datetime
+
+    class FixedSecond(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 24, 12, 0, 0)
+
+    monkeypatch.setattr(datetime, "datetime", FixedSecond)
+
+
+USERS_ONLY_COPY = b'{"JPEG_QUALITY": "the user\'s only copy",, broken'
+
+
+def test_a_second_reset_keeps_the_users_file_and_points_at_it(api, tmp_path, one_second):
+    client = api().test_client()
+    (tmp_path / "settings.json").write_bytes(USERS_ONLY_COPY)
+    first = client.post("/api/settings/reset", headers=AUTH).get_json()
+    second = client.post("/api/settings/reset", headers=AUTH).get_json()
+    assert first["status"] == second["status"] == "success"
+    backups = sorted(tmp_path.glob("settings_corrupted_backup_*.json"))
+    assert [b.read_bytes() for b in backups] == [USERS_ONLY_COPY]
+    assert first["backup_path"] == second["backup_path"] == str(backups[0])
+    assert second["snapshot"]["backup_path"] == str(backups[0])
+
+
+def test_a_reset_never_replaces_an_existing_backup_of_the_same_second(api, tmp_path, one_second):
+    client = api().test_client()
+    taken = tmp_path / "settings_corrupted_backup_20261024_120000.json"
+    taken.write_bytes(b"an earlier backup")
+    (tmp_path / "settings.json").write_bytes(USERS_ONLY_COPY)
+    result = client.post("/api/settings/reset", headers=AUTH).get_json()
+    assert result["status"] == "success"
+    assert taken.read_bytes() == b"an earlier backup"
+    assert Path(result["backup_path"]).name == "settings_corrupted_backup_20261024_120000_002.json"
+    assert Path(result["backup_path"]).read_bytes() == USERS_ONLY_COPY
+    assert sorted(tmp_path.glob("settings_corrupted_backup_*.json"))[-1] == Path(result["backup_path"])
+
+
+def test_a_reset_after_editing_backs_up_the_edited_file(api, tmp_path, one_second):
+    client = api().test_client()
+    (tmp_path / "settings.json").write_bytes(USERS_ONLY_COPY)
+    first = client.post("/api/settings/reset", headers=AUTH).get_json()
+    (tmp_path / "settings.json").write_bytes(b'{"JPEG_QUALITY": 77, "edited": tru')
+    second = client.post("/api/settings/reset", headers=AUTH).get_json()
+    assert second["backup_path"] != first["backup_path"]
+    assert Path(first["backup_path"]).read_bytes() == USERS_ONLY_COPY
+    assert Path(second["backup_path"]).read_bytes() == b'{"JPEG_QUALITY": 77, "edited": tru'
 
 
 def test_a_missing_notepad_is_reported_with_the_path_to_open(api, tmp_path, monkeypatch):
@@ -705,6 +946,15 @@ def test_preview_serves_the_top_of_a_txt_file(api, tmp_path):
     assert body["preview_type"] == "top10"
     assert "row 9" in body["content"]
     assert "row 10" not in body["content"]
+
+
+def test_preview_reads_a_padded_path_like_the_run(api, tmp_path):
+    client = api().test_client()
+    prompt = tmp_path / "my prompt.txt"
+    prompt.write_text("line one\n", encoding="utf-8")
+    for padded in (f" {prompt} ", f"{prompt}\t", f'"{prompt}"'):
+        body = _preview(client, padded).get_json()
+        assert body["preview_type"] == "full" and "line one" in body["content"], (padded, body)
 
 
 def test_preview_refuses_non_txt_before_touching_disk(api, tmp_path):
@@ -804,6 +1054,7 @@ def test_the_bare_name_sweep_can_actually_fail():
         'subprocess.check_output(["notepad.exe"])',
         'subprocess.Popen("notepad.exe file.txt", shell=True)',
         'subprocess.run(f"notepad.exe {path}", shell=True)',
+        'subprocess.Popen(f\'"notepad.exe" "{path}"\')',
         'os.system("notepad.exe file.txt")',
         'os.popen("notepad.exe file.txt")',
         'os.startfile("notepad.exe")',
@@ -821,6 +1072,7 @@ def test_the_bare_name_sweep_can_actually_fail():
         'subprocess.run([sys.executable, "-m", "pip"], check=True)',
         'os.system(r"C:\\Windows\\System32\\notepad.exe file.txt")',
         'subprocess.run(f"{editor} {path}", shell=True)',
+        'subprocess.Popen(f\'"{_explorer_path()}" /select,"{path}"\')',
     ]
     for snippet in cleared:
         assert not _bare_name_spawns(snippet), f"sweep wrongly flagged: {snippet!r}"
@@ -869,7 +1121,8 @@ def _spawn_calls(text: str):
         if isinstance(arg, ast.JoinedStr):
             arg = arg.values[0] if arg.values else None
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            token = arg.value.split()[0] if arg.value.split() else ""
+            words = arg.value.split()
+            token = words[0].strip('"') if words else ""
             if token and "\\" not in token and "/" not in token:
                 return token
         return None
@@ -907,6 +1160,65 @@ def test_no_process_in_src_is_spawned_by_bare_name():
         "process spawned by a bare name Windows resolves through the "
         f"plantable search order: {offenders}"
     )
+
+
+_LAUNCH_HELPER = re.compile(r"_([a-z0-9]+)_path")
+
+
+def _launch_helpers(text: str) -> set:
+    helpers = set()
+    for node in ast.walk(ast.parse(text)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and _is_spawn_func(node.func.value.id, node.func.attr) and node.args):
+            continue
+        program = node.args[1 if node.func.attr.startswith("spawn") else 0] if len(node.args) > 1 else node.args[0]
+        if isinstance(program, (ast.List, ast.Tuple)):
+            program = program.elts[0] if program.elts else None
+        elif isinstance(program, ast.JoinedStr):
+            program = next((part.value for part in program.values
+                            if isinstance(part, ast.FormattedValue)), None)
+        if (isinstance(program, ast.Call) and isinstance(program.func, ast.Name)
+                and _LAUNCH_HELPER.fullmatch(program.func.id)):
+            helpers.add(program.func.id)
+    return helpers
+
+
+def _launch_helper_problems(helpers: dict) -> list:
+    problems = []
+    for name, helper in sorted(helpers.items()):
+        match = _LAUNCH_HELPER.fullmatch(name)
+        assert match, name
+        result = str(helper())
+        if not os.path.isabs(result) or Path(result).stem.lower() != match.group(1):
+            problems.append(f"{name}() returns {result!r}")
+    return problems
+
+
+def test_every_launch_helper_returns_an_absolute_path_to_its_program():
+    import importlib
+
+    helpers = {}
+    for path in sorted(SRC.rglob("*.py")):
+        names = _launch_helpers(path.read_text(encoding="utf-8"))
+        if names:
+            module = importlib.import_module(".".join(path.relative_to(SRC).with_suffix("").parts))
+            helpers.update({name: getattr(module, name) for name in names})
+    assert "_notepad_path" in helpers, "the helper scan no longer sees the settings editor"
+    assert not _launch_helper_problems(helpers)
+
+
+def test_the_launch_helper_check_can_actually_fail():
+    assert _launch_helper_problems({"_cmd_path": lambda: "cmd.exe"}) == ["_cmd_path() returns 'cmd.exe'"]
+    assert _launch_helper_problems({"_cmd_path": lambda: "C:\\Windows\\System32\\notepad.exe"})
+    assert _launch_helper_problems({"_cmd_path": lambda: "system32\\cmd.exe"})
+    assert not _launch_helper_problems({"_cmd_path": lambda: "C:\\Windows\\System32\\cmd.exe"})
+    snippet = ("import subprocess\nimport os\n"
+               "subprocess.Popen([_cmd_path(), '/c', p])\n"
+               "subprocess.run(f'\"{_editor_path()}\" \"{p}\"')\n"
+               "os.system(_shell_path())\n"
+               "subprocess.Popen([sys.executable, p])\n")
+    assert _launch_helpers(snippet) == {"_cmd_path", "_editor_path", "_shell_path"}
 
 
 
@@ -998,6 +1310,21 @@ def test_export_failure_returns_saved_inventory_and_original_source_retry(api, t
     assert not (tmp_path / "different").exists()
 
 
+def test_manual_export_failure_is_logged_like_an_end_of_run_export(api, tmp_path, monkeypatch, caplog):
+    import data_exporter
+    seed_export_run(tmp_path)
+    client = api().test_client()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("workbook failure for the log")
+
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "_workbook", fail)
+    with caplog.at_level("ERROR"):
+        assert client.post("/api/export/database", headers=AUTH).status_code == 207
+    errors = [record.getMessage() for record in caplog.records if record.levelname == "ERROR"]
+    assert errors == ["Report export incomplete: Workbook: workbook failure for the log"]
+
+
 def test_recovery_rejects_replaced_source_and_forged_ids(api, tmp_path):
     database = seed_export_run(tmp_path)
     client = api().test_client()
@@ -1055,7 +1382,7 @@ def test_ui_message_routes_share_the_envelope(api):
 
 
 
-def test_unconfirmed_export_response_keeps_source_without_empty_inventory(api, tmp_path, monkeypatch):
+def test_unconfirmed_export_response_keeps_source_without_empty_inventory(api, tmp_path, monkeypatch, caplog):
     import data_exporter
 
     seed_export_run(tmp_path)
@@ -1067,7 +1394,10 @@ def test_unconfirmed_export_response_keeps_source_without_empty_inventory(api, t
         raise RuntimeError("Lost completed export result")
 
     monkeypatch.setattr(data_exporter.SQLiteDataExporter, "export_all_formats", lose_result)
-    response = client.post("/api/export/database", headers=AUTH)
+    with caplog.at_level("ERROR"):
+        response = client.post("/api/export/database", headers=AUTH)
+    assert any(record.getMessage().startswith("Report export failed: Lost completed export result\nTraceback")
+               for record in caplog.records)
     result = response.get_json()
     assert response.status_code == 500
     assert result["export_state"] == "unknown"
@@ -1075,6 +1405,99 @@ def test_unconfirmed_export_response_keeps_source_without_empty_inventory(api, t
     assert "saved" not in result and "failed" not in result
     assert result["recovery_id"]
     assert list((tmp_path / "output/exports").glob("*.xlsx"))
+
+
+LONG_PATH_SYNTAX = ("\\\\?\\", "\\\\")
+
+
+def _unavailable_drive():
+    return next((f"{letter}:\\" for letter in "ZYXWVUTSRQPONMLKJIHGFE"
+                 if not os.path.exists(f"{letter}:\\")), None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="drive letters and the long-path prefix are Windows-only")
+def test_export_to_an_unavailable_drive_names_the_folder_as_the_user_knows_it(api, tmp_path, caplog):
+    drive = _unavailable_drive()
+    if drive is None:
+        pytest.skip("every drive letter is in use")
+    seed_export_run(tmp_path)
+    client = api().test_client()
+    first = client.post("/api/export/database", headers=AUTH).get_json()
+    with caplog.at_level("ERROR"):
+        response = client.post("/api/export/database", headers=AUTH,
+                               json={"recovery_id": first["recovery_id"], "destination": drive + "reports"})
+    assert response.status_code == 207
+    data = response.get_json()
+    assert data["saved"] == [] and data["failed"]
+    for failure in data["failed"]:
+        assert drive in failure["error"], failure["error"]
+        assert not any(syntax in failure["error"] for syntax in LONG_PATH_SYNTAX), failure["error"]
+    errors = [record.getMessage() for record in caplog.records if record.levelname == "ERROR"]
+    assert len(errors) == 1 and errors[0].startswith("Report export incomplete: Export: "), errors
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the long-path prefix is Windows-only")
+def test_access_denied_report_reads_plainly_in_the_response_and_the_workbook_summary(api, tmp_path, monkeypatch):
+    import errno
+    import data_exporter
+    from fs_utils import get_safe_path
+    from openpyxl import load_workbook
+
+    seed_export_run(tmp_path)
+    original = data_exporter.SQLiteDataExporter._write_csv
+    calls = []
+
+    def denied_once(self, target_path, headers, rows):
+        calls.append(target_path)
+        if len(calls) == 1:
+            raise PermissionError(errno.EACCES, "Permission denied", get_safe_path(target_path))
+        return original(self, target_path, headers, rows)
+
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "_write_csv", denied_once)
+    response = api().test_client().post("/api/export/database", headers=AUTH)
+    assert response.status_code == 207
+    data = response.get_json()
+    [failure] = data["failed"]
+    assert failure["category"] == "access_denied"
+    assert str(tmp_path / "output" / "exports") in failure["error"], failure["error"]
+    assert not any(syntax in failure["error"] for syntax in LONG_PATH_SYNTAX), failure["error"]
+    [workbook] = [Path(file["path"]) for file in data["saved"] if file["format"] == "xlsx"]
+    book = load_workbook(workbook, read_only=True)
+    try:
+        cells = [str(value) for sheet in book.worksheets for row in sheet.iter_rows(values_only=True)
+                 for value in row if value is not None]
+    finally:
+        book.close()
+    assert any("Permission denied" in cell for cell in cells)
+    assert not [cell for cell in cells if any(syntax in cell for syntax in LONG_PATH_SYNTAX)]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the long-path prefix is Windows-only")
+def test_unconfirmed_export_detail_reads_plainly_and_is_logged_once(api, tmp_path, monkeypatch, caplog):
+    import data_exporter
+    from fs_utils import get_safe_path
+
+    seed_export_run(tmp_path)
+    locked = tmp_path / "output" / "exports" / "database_export.xlsx"
+
+    def lose_result(self, destination):
+        raise OSError(22, "Invalid argument", get_safe_path(locked))
+
+    monkeypatch.setattr(data_exporter.SQLiteDataExporter, "export_all_formats", lose_result)
+    with caplog.at_level("WARNING"):
+        response = api().test_client().post("/api/export/database", headers=AUTH)
+    assert response.status_code == 500
+    detail = response.get_json()["detail"]
+    assert str(locked) in detail, detail
+    assert not any(syntax in detail for syntax in LONG_PATH_SYNTAX), detail
+    assert len([record for record in caplog.records if record.levelname == "ERROR"]) == 1
+
+
+def test_successful_export_logs_no_failure(api, tmp_path, caplog):
+    seed_export_run(tmp_path)
+    with caplog.at_level("WARNING"):
+        assert api().test_client().post("/api/export/database", headers=AUTH).status_code == 200
+    assert [record.getMessage() for record in caplog.records if record.levelno >= 30] == []
 
 
 

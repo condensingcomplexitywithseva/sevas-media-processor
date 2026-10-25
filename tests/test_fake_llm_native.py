@@ -600,3 +600,33 @@ def test_scripting_overrides_real_logic(server):
                        headers={"Authorization": "Bearer sk-x"},
                        json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]})
     assert r2.status_code == 200
+
+
+@pytest.mark.parametrize("server", ["openai"], indirect=True)
+def test_json_replies_are_sent_as_json(server):
+    server.queue(status=400, json={"error": {"message": "unknown model 'gpt-é'"}})
+    r = _post(server.base_url + "/v1/chat/completions",
+              headers={"Authorization": "Bearer sk-x"},
+              json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.headers["Content-Type"] == "application/json"
+    assert r.content == json.dumps({"error": {"message": "unknown model 'gpt-é'"}},
+                                   ensure_ascii=False).encode("utf-8")
+
+
+CHAT_PATHS = {"openai": "/v1/chat/completions", "claude": "/v1/messages",
+              "gemini": "/v1beta/openai/chat/completions", "deepseek": "/chat/completions",
+              "mistral": "/v1/chat/completions", "ollama": "/api/chat",
+              "lm-studio": "/v1/chat/completions", "zai": "/api/paas/v4/chat/completions"}
+
+
+def test_the_refusal_check_names_every_simulator():
+    assert set(CHAT_PATHS) == set(available())
+
+
+@pytest.mark.parametrize("server", sorted(CHAT_PATHS), indirect=True)
+def test_every_simulators_own_refusal_is_sent_as_json(server):
+    r = _post(server.base_url + CHAT_PATHS[server.name],
+              json={"model": "é", "messages": [{"role": "user", "content": "é"}]})
+    assert r.status_code >= 400
+    assert r.headers["Content-Type"] == "application/json"
+    assert isinstance(r.json(), dict)

@@ -28,6 +28,12 @@
         <div class="input-row">
             <input type="text" id="input_folder_path" name="INPUT_FOLDER_PATH" value="{{ settings.INPUT_FOLDER_PATH }}">
         </div>
+
+        <div id="input-folder-full" data-full-path-for="INPUT_FOLDER_PATH" style="display: none;">
+            <span class="hint" data-i18n="lbl_full_path">Full path:</span>
+            <code class="ui-location" id="input-folder-full-path" style="display: inline-block;"></code>
+            <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("input-folder-full-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
+        </div>
         <div class="input-row ui-top-small">
             <button class="ui-browse-folder" type="button" onclick="browseOS('folder', 'input_folder_path')" style="display: flex;">📁 <span data-i18n="btn_browse_folder">Choose another folder</span></button>
             <button type="button" class="btn-default" onclick='resetDefaultByName("INPUT_FOLDER_PATH", {{ default_settings.INPUT_FOLDER_PATH | string | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
@@ -40,6 +46,11 @@
         <label data-i18n="lbl_output_folder">Output Folder Path:</label>
         <div class="input-row">
             <input type="text" id="output_folder_path" name="OUTPUT_FOLDER_PATH" value="{{ settings.OUTPUT_FOLDER_PATH }}">
+        </div>
+        <div id="output-folder-full" data-full-path-for="OUTPUT_FOLDER_PATH" style="display: none;">
+            <span class="hint" data-i18n="lbl_full_path">Full path:</span>
+            <code class="ui-location" id="output-folder-full-path" style="display: inline-block;"></code>
+            <button type="button" class="btn-default ui-copy-button" style="display: inline-flex;" onclick='copyTextToClipboard(document.getElementById("output-folder-full-path").innerText, this)'>📋 <span data-i18n="btn_copy_console">Copy</span></button>
         </div>
         <div class="input-row ui-top-small">
             <button class="ui-browse-folder" type="button" onclick="browseOS('folder', 'output_folder_path')" style="display: flex;">📁 <span data-i18n="btn_browse_folder">Choose another folder</span></button>

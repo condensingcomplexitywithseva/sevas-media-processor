@@ -221,12 +221,9 @@ class ProcessorCore:
             export_outcome = self.exporter.export_all_formats(self.settings.TECH_FOLDER_PATH)
         except ExportError as e:
             export_outcome = e.outcome
-            logger.error(f"Report export incomplete: {e}")
         except Exception as e:
-            logger.error(f"Report export failed: {e}\n{traceback.format_exc()}")
-            export_failure = {"status": "error", "export_state": "unknown",
-                              "message_key": "err_export_outcome_unknown", "detail": str(e),
-                              "path": str(self.settings.TECH_FOLDER_PATH)}
+            from routes.export_api import unconfirmed_export_outcome
+            export_failure = unconfirmed_export_outcome(e, self.settings.TECH_FOLDER_PATH)
         finally:
             if self.on_progress:
                 result = export_outcome.as_dict() if export_outcome is not None else export_failure

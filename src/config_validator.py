@@ -12,7 +12,7 @@ from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 from schemas import OverallResult
 from range_parsers import PageRangeSelector, VideoSelector
-from fs_utils import read_prompt, get_safe_path
+from fs_utils import folder_setting_problem, path_setting_text, read_prompt, get_safe_path
 from user_data import DEFAULT_INPUT_FOLDER, DEFAULT_OUTPUT_FOLDER
 import copy
 import json
@@ -86,6 +86,13 @@ class ProviderConfig(BaseModel):
     image_payload_style: Literal["data_uri", "base64_dict"] = "data_uri"
     reasoning_handling: Literal["preserve", "strip_xml", "parse_claude_blocks", "ignore_api_field"] = "preserve"
     response_extraction_path: str = "choices[0].message.content"
+
+    @field_validator("url", "model", "auth_header_key", "auth_header_format",
+                     "extra_header_key", "extra_header_value", "response_extraction_path",
+                     mode="before")
+    @classmethod
+    def strip_surrounding_whitespace(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("max_tokens_field")
     @classmethod
@@ -274,6 +281,11 @@ class Settings(BaseModel):
         return {key: copy.deepcopy(_without_retired(entry, RETIRED_PROVIDER_FIELDS))
                 for key, entry in value.items()}
 
+    @field_validator("INPUT_FOLDER_PATH", "OUTPUT_FOLDER_PATH", mode="before")
+    @classmethod
+    def strip_folder_whitespace(cls, value: Any) -> Any:
+        return path_setting_text(value) if isinstance(value, str) else value
+
     @field_validator("NO_RETRY_STATUSES", mode="before")
     @classmethod
     def parse_no_retry_statuses(cls, value: Any) -> list[OverallResult]:
@@ -412,8 +424,14 @@ def validate_business_rules(
 ) -> list[tuple[str, str]]:
     errors = []
 
-    input_raw = str(settings.get("INPUT_FOLDER_PATH") or "")
-    output_raw = str(settings.get("OUTPUT_FOLDER_PATH") or "")
+    input_raw = path_setting_text(settings.get("INPUT_FOLDER_PATH"))
+    output_raw = path_setting_text(settings.get("OUTPUT_FOLDER_PATH"))
+    input_problem = folder_setting_problem(input_raw)
+    output_problem = folder_setting_problem(output_raw)
+    if input_problem:
+        errors.append(("INPUT_FOLDER_PATH", input_problem))
+    if output_problem:
+        errors.append(("OUTPUT_FOLDER_PATH", output_problem))
     try:
         input_path = Path(input_raw).resolve()
         output_path = Path(output_raw).resolve()
@@ -422,15 +440,17 @@ def validate_business_rules(
         output_path = Path(output_raw).absolute()
 
     input_path_check = Path(get_safe_path(input_path))
-    if not input_path_check.exists():
-        errors.append(("INPUT_FOLDER_PATH", "err_input_missing"))
-    elif not input_path_check.is_dir():
-        errors.append(("INPUT_FOLDER_PATH", "err_input_not_dir"))
+    if not input_problem:
+        if not input_path_check.exists():
+            errors.append(("INPUT_FOLDER_PATH", "err_input_missing"))
+        elif not input_path_check.is_dir():
+            errors.append(("INPUT_FOLDER_PATH", "err_input_not_dir"))
 
     input_check = Path(os.path.normcase(str(input_path)))
     output_check = Path(os.path.normcase(str(output_path)))
 
-    if (input_check == output_check or output_check.is_relative_to(input_check)
+    if not (input_problem or output_problem) and (
+            input_check == output_check or output_check.is_relative_to(input_check)
             or input_check.is_relative_to(output_check)):
         errors.append(("OUTPUT_FOLDER_PATH", "err_path_overlap"))
         errors.append(("INPUT_FOLDER_PATH", "err_path_overlap"))
@@ -462,6 +482,7 @@ def validate_business_rules(
                 return
             if mode == "FILE":
                 prefix = "user" if "USER" in field else "sys"
+                v = path_setting_text(v)
                 try:
                     exists = Path(get_safe_path(Path(v))).is_file()
                 except Exception:

@@ -121,7 +121,7 @@ def test_failed_workbook_has_persistent_inventory_and_retry(open_page, tmp_path,
     _open_exports_tab(page)
     page.click("button:has(span[data-i18n='btn_export_db'])")
     page.wait_for_selector("#modal-overlay", state="visible")
-    assert "Workbook save failed for this test" in page.locator("#export-db-files li").last.get_attribute("title")
+    assert "Workbook save failed for this test" in page.locator("#export-db-files li").last.inner_text()
     assert "could not be written" in page.locator("#modal-message").inner_text()
     assert page.locator("#modal-path").inner_text() == ""
     screenshot = tmp_path / "export-error-dialog-en.png"
@@ -137,8 +137,11 @@ def test_failed_workbook_has_persistent_inventory_and_retry(open_page, tmp_path,
     assert page.locator("#export-db-saved").inner_text() == "Saved: CSV reports (3)"
     page.evaluate("window.renderErrors()")
     assert page.locator("#export-db-status").inner_text() == "Not saved: Excel workbook (.xlsx)."
-    assert not page.locator("#export-db-location").is_visible()
-    assert not page.locator("#export-db-files").is_visible()
+    assert page.locator("#export-db-location").is_visible()
+    assert page.locator("#export-db-path").inner_text() == str(tmp_path / "output" / "exports")
+    entries = page.locator("#export-db-files li")
+    assert all(entries.nth(index).is_visible() for index in range(4))
+    assert entries.last.locator("text=Workbook save failed for this test").is_visible()
     styles = page.evaluate("""() => {
         const status = getComputedStyle(document.getElementById('export-db-status'));
         const peer = getComputedStyle(document.querySelector('.error-text:not(#export-db-status)'));
@@ -195,12 +198,12 @@ def test_export_inventory_treats_untrusted_text_as_text(open_page):
     malicious = '<img src=x onerror="window.injected=true">'
     page.evaluate(
         "text => window.showExportOutcome({status:'error', "
-        "saved:[{path:text,format:'csv',report:'Results'}], failed:[], notices:[]})",
+        "saved:[{path:text,format:'csv',report:'Results'}], "
+        "failed:[{report:'Workbook',format:'xlsx',category:'write_failed',error:text}], notices:[]})",
         malicious,
     )
     assert page.locator("#export-db-files img").count() == 0
-    page.locator("#export-db-details summary").click()
-    assert malicious in page.locator("#export-db-files").inner_text()
+    assert page.locator("#export-db-files").inner_text().count(malicious) == 2
     assert page.evaluate("window.injected === undefined")
 
 
@@ -227,16 +230,15 @@ def test_export_messages_identify_failed_formats_and_do_not_offer_an_unsaved_loc
             assert (expected_csv in message) == any(f["format"] == "csv" for f in failures)
             assert (expected_excel in message) == any(f["format"] == "xlsx" for f in failures)
             assert "unused" not in page.locator("#export-db-result").inner_text()
-            page.locator("#export-db-details").evaluate("node => { node.open = true; }")
+            assert page.locator("#export-db-files").is_visible()
             assert not page.locator("#export-db-location").is_visible()
             assert page.locator("#export-db-saved").inner_text() in (
                 "No report files were saved.",
                 "Ни один отчёт не сохранён.",
             )
-            page.locator("#export-db-details").evaluate("node => { node.open = false; }")
 
 
-def test_workbook_limit_notice_remains_visible_without_opening_file_details(open_page):
+def test_workbook_limit_notice_and_file_list_are_both_visible(open_page):
     page = open_page({})
     _open_exports_tab(page)
     for format_name in ("csv", "xlsx"):
@@ -248,7 +250,58 @@ def test_workbook_limit_notice_remains_visible_without_opening_file_details(open
         )
         text = page.locator("#export-db-limits").inner_text()
         assert ("See Summary" in text) == (format_name == "xlsx")
-        assert not page.locator("#export-db-files").is_visible()
+        assert page.locator("#export-db-files").is_visible()
+        assert "1 cells cut across the workbook" in page.locator("#export-db-files").inner_text()
+
+
+def test_long_file_list_is_fully_visible_without_interaction_at_window_width(open_page, tmp_path):
+    page = open_page({})
+    page.set_viewport_size({"width": 1280, "height": 800})
+    _open_exports_tab(page)
+    saved = [{"report": "Results", "format": "csv", "path": f"C:/reports/results_{n:02}.csv"} for n in range(7)]
+    failed = [{"report": "Page Log", "format": "csv", "category": "locked",
+               "error": f"[WinError 32] The process cannot access the file: 'C:/reports/page_log_{n}.csv'"}
+              for n in range(4)] + [{"report": "Workbook", "format": "xlsx", "category": "disk_full",
+                                     "error": "[Errno 28] No space left on device"}]
+    page.evaluate("data => window.showExportOutcome(Object.assign({status: 'error', path: 'C:/reports', "
+                  "notices: []}, data))", {"saved": saved, "failed": failed})
+    for language, heading in (("en", "Files"), ("ru", "Файлы")):
+        page.evaluate("changeLanguage", language)
+        page.wait_for_timeout(300)
+        assert page.locator("[data-i18n='export_files_heading']").inner_text() == heading
+        entries = page.locator("#export-db-files li")
+        assert entries.count() == 12
+        for index in range(12):
+            entries.nth(index).scroll_into_view_if_needed()
+            assert entries.nth(index).is_visible()
+        for error in (file["error"] for file in failed):
+            assert page.locator("#export-db-files").get_by_text(error, exact=True).is_visible()
+        own_scroll = page.evaluate("""() => ['export-db-details', 'export-db-files', 'export-db-result'].map(id => {
+            const el = document.getElementById(id), style = getComputedStyle(el);
+            return [id, style.overflowY, style.maxHeight, el.scrollHeight > el.clientHeight];
+        })""")
+        assert all(row[1:] == ["visible", "none", False] for row in own_scroll), own_scroll
+        screenshot = tmp_path / f"export-long-list-{language}.png"
+        page.locator("#export-db-result").screenshot(path=str(screenshot))
+        print(f"EXPORT_PREVIEW={screenshot}")
+
+
+def test_failed_entry_diagnostic_has_a_working_copy_button(open_page):
+    page = open_page({})
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    _open_exports_tab(page)
+    diagnostic = "[Errno 13] Permission denied: 'C:\\reports\\results_1.csv'"
+    page.evaluate("error => window.showExportOutcome({status: 'error', saved: [], notices: [], "
+                  "failed: [{report: 'Results', format: 'csv', category: 'access_denied', error}]})", diagnostic)
+    entry = page.locator("#export-db-files li")
+    assert "Access was denied. Choose a writable folder." in entry.inner_text()
+    entry.locator("button").click()
+    page.wait_for_timeout(300)
+    assert page.evaluate("navigator.clipboard.readText()") == diagnostic
+    page.wait_for_timeout(1700)
+    page.evaluate("changeLanguage('ru')")
+    page.wait_for_timeout(300)
+    assert entry.locator("button span").inner_text() == page.evaluate("getT('btn_copy_console')") == "Копировать"
 
 
 
@@ -289,7 +342,7 @@ def test_missing_translation_and_incomplete_export_failure_stay_readable(open_pa
         assert 'undefined' not in text and 'null' not in text
         assert page.locator('#export-db-reason').inner_text().strip()
         assert 'undefined' not in page.locator('#export-db-files').text_content()
-        assert 'undefined' not in page.locator('#export-db-files li').last.get_attribute('title')
+        assert page.locator('#export-db-files li').last.locator('button').count() == 0
         page.click('#modal-ok')
         page.unroute('**/api/export/database')
     assert any('export_error_permission' in message for message in errors)

@@ -10,10 +10,12 @@
 #    paste the text.
 # 4. If a warning says the text contains multiple lines or is very large,
 #    click "Paste anyway".
-# 5. Press Enter.
+# 5. If the window shows "Press Enter to start the setup.", press Enter.
 # 6. When the window asks for install.txt, drag install.txt from the
 #    extracted folder (sevas-media-processor-main) into the PowerShell
 #    window, then press Enter.
+# 7. When the window asks a question, type the number of your answer, then
+#    press Enter.
 #
 # If you run into problems, open README.md in this folder.
 
@@ -22,6 +24,9 @@ $ErrorActionPreference = "Stop"
 
 if (-not [Console]::IsOutputRedirected) {
     try { Clear-Host } catch { }
+    if (-not [Console]::IsInputRedirected) {
+        try { $Host.UI.RawUI.FlushInputBuffer() } catch { }
+    }
 }
 
 function Show-Box {
@@ -32,6 +37,16 @@ function Show-Box {
     foreach ($line in $Lines) { Write-Host ("# " + $line.PadRight($width - 4) + " #") -ForegroundColor $Color }
     Write-Host ("#" * $width) -ForegroundColor $Color
     Write-Host ""
+}
+
+function Show-Finish {
+    Write-Host ""
+    Write-Host "##########################################################################" -ForegroundColor Green
+    Write-Host "# INSTALLATION COMPLETE!                                                 #" -ForegroundColor Green
+    Write-Host "#                                                                        #" -ForegroundColor Green
+    Write-Host "# Launch the app using the 'Seva's Media Processor' shortcut on your     #" -ForegroundColor Green
+    Write-Host "# Desktop. You can close this window now.                                #" -ForegroundColor Green
+    Write-Host "##########################################################################" -ForegroundColor Green
 }
 
 function Test-AppFolder {
@@ -67,8 +82,9 @@ while (-not (Test-AppFolder $InstallDir)) {
 }
 Write-Host "Installing into: $InstallDir"
 
-$RequiredMajor = 3
-$RequiredMinor = 14
+# Python 3.13 and 3.14 are tested; requirements.lock installs on both.
+$SupportedMinors = @(13, 14)
+$AutoInstallMinor = 14
 $UseStrictRequirements = $true
 
 function Stop-OnFailure {
@@ -80,91 +96,210 @@ function Stop-OnFailure {
     }
 }
 
-Write-Host "1/5 Verifying Global Python Installation..."
-try {
-    $pythonPath = (Get-Command python.exe -ErrorAction Stop).Source
-    $versionString = & $pythonPath --version 2>&1
-    $versionParts = ($versionString -replace '[^\d.]', '').Split('.')
-    $major = [int]$versionParts[0]
-    $minor = [int]$versionParts[1]
-
-    if ($major -lt $RequiredMajor -or ($major -eq $RequiredMajor -and $minor -lt $RequiredMinor)) {
-        Write-Host "Found Python $versionString, but this application is tested with Python 3.14." -ForegroundColor Yellow
-        $upgradeChoice = Read-Host "Would you like to automatically upgrade to Python 3.14? (Y/N)"
-
-        if ($upgradeChoice -match '^[Yy]') {
-            throw "User approved upgrade"
-        } else {
-            Write-Host "Upgrade declined." -ForegroundColor Yellow
-            $proceedChoice = Read-Host "Would you like to proceed with your older version of Python AT YOUR OWN RISK? (Y/N)"
-
-            if ($proceedChoice -match '^[Yy]') {
-                Write-Host "Proceeding with Python $versionString at your own risk." -ForegroundColor Magenta
-                Write-Host "Note: We will not install the exact versions of the dependencies to try to make it work on your older setup. Errors may still occur." -ForegroundColor Magenta
-                $UseStrictRequirements = $false
-            } else {
-                Write-Host "Setup cancelled. Cannot proceed without a compatible Python version." -ForegroundColor Red
-                Read-Host "Press Enter to close this window"
-                exit 1
-            }
-        }
-    } elseif ($major -gt $RequiredMajor -or $minor -gt $RequiredMinor) {
-        Write-Host "Found Python $versionString, which is newer than Python $RequiredMajor.$RequiredMinor - the version this application is tested with." -ForegroundColor Yellow
-        $proceedChoice = Read-Host "Would you like to proceed with your newer version of Python AT YOUR OWN RISK? (Y/N)"
-
-        if ($proceedChoice -match '^[Yy]') {
-            Write-Host "Proceeding with Python $versionString at your own risk." -ForegroundColor Magenta
-            Write-Host "Note: We will not install the exact tested versions of the dependencies, because builds for your newer Python may not exist yet. Errors may still occur." -ForegroundColor Magenta
-            $UseStrictRequirements = $false
-        } else {
-            Write-Host "Setup cancelled. This version of the application is tested with Python $RequiredMajor.$RequiredMinor." -ForegroundColor Red
-            Read-Host "Press Enter to close this window"
-            exit 1
-        }
-    } else {
-        Write-Host "Found Python $versionString. (Requirements met)." -ForegroundColor Green
+function Read-Choice {
+    param([string[]]$Allowed)
+    $listed = ($Allowed[0..($Allowed.Count - 2)] -join ", ") + " or " + $Allowed[-1]
+    while ($true) {
+        $answer = "$(Read-Host "Type $listed, then press Enter")".Trim()
+        if (-not $answer) { return $null }
+        if ($Allowed -contains $answer) { return $answer }
+        Write-Host "Please type $listed." -ForegroundColor Yellow
     }
-} catch {
-    if ($_.Exception.Message -match "User approved upgrade") {
-        Write-Host "Attempting to install via winget..." -ForegroundColor Yellow
-    } else {
-        Write-Host "Python not found. Attempting to install via winget..." -ForegroundColor Yellow
+}
+
+function Stop-NothingChosen {
+    Show-Box @("Nothing was chosen, so nothing was installed.") "Red"
+    Read-Host "Press Enter to close this window"
+    exit 1
+}
+
+function Get-PythonVersion {
+    param([string]$Exe)
+    try { $text = & $Exe --version 2>&1 | Out-String } catch { return $null }
+    if ("$text" -match 'Python (\d+)\.(\d+)\.(\d+)') {
+        return [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
     }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host "winget is not available on this computer. Install Python 3.14 from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' during the installation), then open Windows PowerShell again and paste the text again." -ForegroundColor Red
+    return $null
+}
+
+function Test-Starts {
+    param([string]$Exe)
+    try { $null = & $Exe -c "pass" 2>&1 } catch { return $false }
+    return $LASTEXITCODE -eq 0
+}
+
+# python.exe on PATH (not the Microsoft Store placeholder), then every Python
+# the py launcher knows - installed without "Add python.exe to PATH" - then
+# the usual install folders of the supported versions.
+function Find-Pythons {
+    $found = @(Get-Command python.exe -All -ErrorAction SilentlyContinue |
+               ForEach-Object { $_.Source } | Where-Object { $_ -notlike '*\WindowsApps\*' })
+    $launcher = Get-Command py.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($launcher) {
+        try { $listing = & $launcher.Source -0p 2>&1 | Out-String } catch { $listing = "" }
+        foreach ($line in "$listing" -split "`r?`n") {
+            if ($line -match '^\s*-\S+\s+(?:\*\s+)?(.+?\.exe)\s*$') { $found += $Matches[1] }
+        }
+    }
+    foreach ($minor in $SupportedMinors) {
+        $found += "$env:LOCALAPPDATA\Programs\Python\Python3$minor\python.exe"
+        $found += "$env:ProgramFiles\Python3$minor\python.exe"
+    }
+    return @($found | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique)
+}
+
+Write-Host "1/6 Finding Python 3.13 or 3.14..."
+$pythonPath = $null
+$pythonVersion = $null
+$otherPath = $null
+$otherVersion = $null
+foreach ($candidate in Find-Pythons) {
+    $version = Get-PythonVersion $candidate
+    if (-not $version) { continue }
+    if ($version.Major -eq 3 -and $SupportedMinors -contains $version.Minor) {
+        $pythonPath = $candidate
+        $pythonVersion = $version
+        break
+    }
+    if (-not $otherVersion -or $version -gt $otherVersion) {
+        $otherPath = $candidate
+        $otherVersion = $version
+    }
+}
+
+if ($pythonPath) {
+    Write-Host "Found Python $pythonVersion at $pythonPath." -ForegroundColor Green
+} else {
+    $newer = $otherVersion -and ($otherVersion.Major -gt 3 -or $otherVersion.Minor -gt $SupportedMinors[-1])
+    if ($otherVersion) {
+        $found = "Found Python $otherVersion, which this application is not tested with."
+    } else {
+        $found = "No Python was found on this computer."
+    }
+    $lines = @("PYTHON 3.13 OR 3.14 IS NEEDED",
+               "",
+               $found,
+               "",
+               "1 - Install Python 3.$AutoInstallMinor now from the internet, for your",
+               "    Windows user only (with winget, Windows' own installer).",
+               "2 - Stop here. I will install Python myself or ask my IT department.")
+    $allowed = @("1", "2")
+    if ($newer) {
+        $lines += "3 - Continue with Python $otherVersion at my own risk (not tested)."
+        $allowed += "3"
+    }
+    Show-Box $lines
+    $choice = Read-Choice $allowed
+    if (-not $choice) { Stop-NothingChosen }
+
+    if ($choice -eq "2") {
+        Show-Box @("INSTALL PYTHON YOURSELF",
+                   "",
+                   "Install Python 3.$AutoInstallMinor (3.13 also works). At work, your IT",
+                   "department may provide it. From python.org: open",
+                   "https://www.python.org/downloads/windows/ and choose the",
+                   "'Windows installer (64-bit)' of the latest Python 3.$AutoInstallMinor release.",
+                   "",
+                   "When Python is installed, close this window, open Windows",
+                   "PowerShell again from the Start menu, paste the text of",
+                   "install.txt again and press Enter.",
+                   "",
+                   "Nothing was installed this time.")
         Read-Host "Press Enter to close this window"
         exit 1
     }
-    winget install --id Python.Python.3.14 --silent --accept-source-agreements --accept-package-agreements
-    Stop-OnFailure "installing Python with winget"
 
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
-    $pythonPath = $null
-    $candidates = @("$env:LOCALAPPDATA\Programs\Python\Python$RequiredMajor$RequiredMinor\python.exe",
-                    "$env:ProgramFiles\Python$RequiredMajor$RequiredMinor\python.exe")
-    $candidates += @(Get-Command python.exe -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ -notlike '*\WindowsApps\*' })
-    foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
-            $versionString = & $candidate --version 2>&1
-            if ("$versionString" -match "^Python $RequiredMajor\.$RequiredMinor\.") {
+    if ($choice -eq "3") {
+        $pythonPath = $otherPath
+        $pythonVersion = $otherVersion
+        $UseStrictRequirements = $false
+        Write-Host "Continuing with Python $otherVersion at your own risk. The libraries are installed" -ForegroundColor Magenta
+        Write-Host "without the tested versions, because builds for this Python may not exist yet." -ForegroundColor Magenta
+    }
+
+    if ($choice -eq "1") {
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Show-Box @("winget is not available on this computer.",
+                       "Install Python 3.$AutoInstallMinor yourself: open https://www.python.org/downloads/windows/",
+                       "and choose the 'Windows installer (64-bit)' of the latest Python 3.$AutoInstallMinor",
+                       "release. Then open Windows PowerShell again from the Start menu,",
+                       "paste the text of install.txt again and press Enter.") "Red"
+            Read-Host "Press Enter to close this window"
+            exit 1
+        }
+        Write-Host "Installing Python 3.$AutoInstallMinor with winget..." -ForegroundColor Yellow
+        winget install --id "Python.Python.3.$AutoInstallMinor" --source winget --silent --accept-source-agreements --accept-package-agreements
+        Stop-OnFailure "installing Python with winget"
+
+        $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+        # winget's own install folders first, then everything else.
+        $installed = @("$env:LOCALAPPDATA\Programs\Python\Python3$AutoInstallMinor\python.exe",
+                       "$env:ProgramFiles\Python3$AutoInstallMinor\python.exe") + @(Find-Pythons)
+        foreach ($candidate in ($installed | Where-Object { Test-Path -LiteralPath $_ })) {
+            $version = Get-PythonVersion $candidate
+            if ($version -and $version.Major -eq 3 -and $version.Minor -eq $AutoInstallMinor) {
                 $pythonPath = $candidate
+                $pythonVersion = $version
                 break
             }
         }
+        if (-not $pythonVersion -or $pythonVersion.Minor -ne $AutoInstallMinor) {
+            Show-Box @("ACTION NEEDED",
+                       "",
+                       "Python is installed, but this window cannot find it yet.",
+                       "Close this window, open Windows PowerShell again from",
+                       "the Start menu, paste the text again and press Enter.")
+            Read-Host "Press Enter to close this window"
+            exit
+        }
+        Write-Host "Python installed: $pythonVersion at $pythonPath. Continuing." -ForegroundColor Green
     }
-    if (-not $pythonPath) {
-        Show-Box @("ACTION NEEDED",
-                   "",
-                   "Python is installed, but this window cannot find it yet.",
-                   "Close this window, open Windows PowerShell again from",
-                   "the Start menu, paste the text again and press Enter.")
-        Read-Host "Press Enter to close this window"
-        exit
-    }
-    Write-Host "Python installed: $versionString at $pythonPath. Continuing." -ForegroundColor Green
 }
 
-Write-Host "2/5 Creating/Verifying isolated Virtual Environment..."
+Write-Host "2/6 Choosing where the libraries come from..."
+Show-Box @("WHERE SHOULD THE LIBRARIES COME FROM?",
+           "",
+           "The application needs about 35 Python libraries.",
+           "",
+           "1 - The internet: pypi.org, the public Python package index.",
+           "2 - My organisation's package mirror. Only the mirror is used:",
+           "    if a library is missing there, the installation stops.")
+$source = Read-Choice @("1", "2")
+if (-not $source) { Stop-NothingChosen }
+$PipSource = @()
+$SourceName = "pypi.org"
+if ($source -eq "2") {
+    while (-not $PipSource) {
+        $mirror = "$(Read-Host 'Mirror address, for example https://mirror.example.com/simple/')".Trim()
+        if (-not $mirror) { Stop-NothingChosen }
+        if ($mirror -match '^https://[^\s/]+') {
+            # With --isolated, PIP_CONFIG_FILE set to "nul" (pip's settings files
+            # skipped) and every other PIP_* variable cleared around pip, no
+            # extra package address can bring pypi.org back.
+            $PipSource = @("--isolated", "--disable-pip-version-check", "--index-url", $mirror)
+        } else {
+            Write-Host "The address must start with https://." -ForegroundColor Yellow
+        }
+    }
+    $SourceName = $mirror
+    Write-Host "The libraries will come only from $mirror." -ForegroundColor Green
+}
+
+Write-Host "3/6 Creating/Verifying isolated Virtual Environment..."
+# A venv runs the Python that made it; once that Python is uninstalled the
+# venv cannot start and is rebuilt.
+if ((Test-Path -LiteralPath "$InstallDir\venv") -and -not (Test-Starts "$InstallDir\venv\Scripts\python.exe")) {
+    Write-Host "The existing virtual environment cannot start (its Python was probably removed). Rebuilding it." -ForegroundColor Yellow
+    try {
+        [System.IO.Directory]::Delete("$InstallDir\venv", $true)
+    } catch {
+        Show-Box @("The old venv folder could not be deleted: $($_.Exception.Message)",
+                   "Close Seva's Media Processor if it is running, then paste the text",
+                   "of install.txt again and press Enter.") "Red"
+        Read-Host "Press Enter to close this window"
+        exit 1
+    }
+}
 if (!(Test-Path -LiteralPath "$InstallDir\venv")) {
     & $pythonPath -m venv "$InstallDir\venv"
     Stop-OnFailure "creating the virtual environment"
@@ -176,19 +311,100 @@ if (!(Test-Path -LiteralPath "$InstallDir\venv")) {
 $venvPython = "$InstallDir\venv\Scripts\python.exe"
 $venvPythonw = "$InstallDir\venv\Scripts\pythonw.exe"
 
-Write-Host "3/5 Installing media libraries into the virtual environment (This takes a moment)..."
-& $venvPython -m pip install --upgrade pip | Out-Null
-Stop-OnFailure "upgrading pip"
+$PipWithWindowsTrust = @(
+    "try:",
+    "    from pip._vendor import truststore",
+    "except ImportError:",
+    "    truststore = None",
+    "if truststore and tuple(int(part) for part in truststore.__version__.split('.')[:2]) >= (0, 9):",
+    "    truststore.inject_into_ssl()",
+    "import runpy",
+    "runpy.run_module('pip', run_name='__main__', alter_sys=True)") -join "`n"
 
-if ($UseStrictRequirements) {
-    & $venvPython -m pip install -r "$InstallDir\requirements.lock"
-    Stop-OnFailure "installing the libraries"
-} else {
-    & $venvPython -m pip install -r "$InstallDir\requirements_no_version.txt"
-    Stop-OnFailure "installing the libraries"
+function Invoke-Pip {
+    param([string]$Step, [string[]]$Arguments, [switch]$Upgrade)
+    $log = [System.IO.Path]::GetTempFileName()
+    & $venvPython -c $PipWithWindowsTrust @Arguments --no-input --log $log
+    Stop-OnPipFailure $Step $log -Upgrade:$Upgrade
 }
 
-Write-Host "4/5 Preparing first-run files..."
+function Stop-OnPipFailure {
+    param([string]$Step, [string]$Log, [switch]$Upgrade)
+    $exitCode = $LASTEXITCODE
+    $lines = @()
+    try { $lines = [System.IO.File]::ReadAllLines($Log) } catch { }
+    try { [System.IO.File]::Delete($Log) } catch { }
+    if ($exitCode -eq 0 -and (-not $Upgrade -or ($lines -match 'Fetched page'))) { return }
+    $failures = @($lines | Where-Object { $_ -match 'Could not fetch URL|ERROR:' }) -join "`n"
+    $cause = @()
+    if ($failures -match 'SSLCertVerificationError|SSLVerificationError|ssl-verification-failed|CERTIFICATE_VERIFY_FAILED|problem confirming the ssl certificate') {
+        $cause = @("CERTIFICATE NOT TRUSTED",
+                   "",
+                   "Windows does not trust the certificate of the connection to",
+                   "$SourceName. If this computer is on a network that inspects",
+                   "HTTPS traffic, such as a corporate one, IT installs its root",
+                   "certificate in Windows. Then paste the text of install.txt again.")
+    } elseif ($failures -match '407 Proxy Authentication Required') {
+        $cause = @("PROXY SIGN-IN NEEDED",
+                   "",
+                   "The proxy refused to connect to $SourceName without sign-in",
+                   "(HTTP 407). Ask your IT department how programs on this",
+                   "computer sign in to the proxy.")
+    } elseif ($failures -match '(401|403) Client Error') {
+        $cause = @("ACCESS REFUSED",
+                   "",
+                   "$SourceName refused access (HTTP $($Matches[1])).",
+                   "Ask your IT department for access to it.")
+    } elseif ($failures -match 'connection error|NewConnectionError|NameResolutionError|ConnectTimeoutError|Max retries exceeded|Read timed out') {
+        $cause = @("PACKAGE SOURCE NOT REACHED",
+                   "",
+                   "This computer could not connect to $SourceName.",
+                   "Check the network connection and the address, then paste",
+                   "the text of install.txt again.")
+    } elseif ($exitCode -ne 0 -and $failures -match 'No matching distribution found for (\S+)') {
+        $cause = @("LIBRARY NOT FOUND",
+                   "",
+                   "$($Matches[1]) was not found at $SourceName.")
+        if ($PipSource) {
+            $cause += @("The mirror does not have it, or the address is not the",
+                        "mirror's package index (such an address usually ends in",
+                        "/simple/). Ask your IT department.")
+        }
+    }
+    if ($exitCode -eq 0 -and -not $cause) { return }
+    if ($exitCode -eq 0) {
+        Write-Host "FAILED: $Step. The steps after this one were not run." -ForegroundColor Red
+    } else {
+        Write-Host "FAILED: $Step (exit code $exitCode). The steps after this one were not run." -ForegroundColor Red
+    }
+    if ($cause) { Show-Box $cause "Red" }
+    Read-Host "Press Enter to close this window"
+    exit 1
+}
+
+Write-Host "4/6 Installing media libraries into the virtual environment (This takes a moment)..."
+$savedPipVariables = @()
+if ($PipSource) {
+    # pip installs a source package's build dependencies with a second pip that
+    # does not get --isolated, so no PIP_* variable may reach either of them.
+    $savedPipVariables = @(Get-ChildItem Env: | Where-Object { $_.Name -like 'PIP_*' } |
+                           ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } })
+    foreach ($variable in $savedPipVariables) { [Environment]::SetEnvironmentVariable($variable.Name, $null) }
+    $env:PIP_CONFIG_FILE = "nul"
+}
+Invoke-Pip "upgrading pip" (@("install") + $PipSource + @("--upgrade", "pip")) -Upgrade | Out-Null
+
+if ($UseStrictRequirements) {
+    Invoke-Pip "installing the libraries" (@("install") + $PipSource + @("-r", "$InstallDir\requirements.lock"))
+} else {
+    Invoke-Pip "installing the libraries" (@("install") + $PipSource + @("-r", "$InstallDir\requirements_no_version.txt"))
+}
+if ($PipSource) {
+    [Environment]::SetEnvironmentVariable("PIP_CONFIG_FILE", $null)
+    foreach ($variable in $savedPipVariables) { [Environment]::SetEnvironmentVariable($variable.Name, $variable.Value) }
+}
+
+Write-Host "5/6 Preparing first-run files..."
 foreach ($dir in @("input", "output")) {
     if (!(Test-Path -LiteralPath "$InstallDir\$dir")) {
         [System.IO.Directory]::CreateDirectory("$InstallDir\$dir") | Out-Null
@@ -200,7 +416,7 @@ if (!(Test-Path -LiteralPath "$InstallDir\settings.json")) {
     Write-Host "Created settings.json from the settings.example.json template." -ForegroundColor Green
 }
 
-Write-Host "5/5 Creating your Desktop Shortcut..."
+Write-Host "6/6 Creating your Desktop Shortcut..."
 $DesktopDir = [Environment]::GetFolderPath('Desktop')
 $WshShell = New-Object -comObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("$DesktopDir\Seva's Media Processor.lnk")
@@ -211,11 +427,9 @@ $Shortcut.WindowStyle = 1
 $Shortcut.IconLocation = "$InstallDir\src\static\app_icon.ico,0"
 $Shortcut.Save()
 
-Write-Host ""
-Write-Host "##########################################################################" -ForegroundColor Green
-Write-Host "# INSTALLATION COMPLETE!                                                 #" -ForegroundColor Green
-Write-Host "#                                                                        #" -ForegroundColor Green
-Write-Host "# Launch the app using the 'Seva's Media Processor' shortcut on your     #" -ForegroundColor Green
-Write-Host "# Desktop. You can close this window now.                                #" -ForegroundColor Green
-Write-Host "##########################################################################" -ForegroundColor Green
+Show-Finish
+
+# ########################################
+# #  Press Enter to start the setup.     #
+# ########################################
 }

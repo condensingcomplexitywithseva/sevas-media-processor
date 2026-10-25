@@ -46,6 +46,17 @@ def test_crash_log_lands_in_the_configured_output_folder(sandbox, tmp_path):
     assert "Trapped Pre-Boot System Logs" in content
 
 
+def test_a_padded_output_folder_setting_names_the_folder_without_the_spaces(sandbox, tmp_path):
+    app_root, _ = sandbox
+    output_folder = tmp_path / "run_output"
+    write_settings(app_root, f" {output_folder} ")
+
+    main_module.write_fatal_panic_log(CRASH_DETAILS, app_root=app_root)
+
+    assert CRASH_DETAILS in (output_folder / LOG_NAME).read_text(encoding="utf-8")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["app", "home", "run_output"]
+
+
 def test_unwritable_output_folder_falls_back_beside_it(sandbox, tmp_path):
     app_root, _ = sandbox
     blocked = tmp_path / "blocked_output"

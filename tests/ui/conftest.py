@@ -228,7 +228,7 @@ def app_server(tmp_path, monkeypatch, server_drains):
 
     import routes.export_api as export_api
     monkeypatch.setattr(export_api, "_reveal_in_explorer", lambda path: False)
-    monkeypatch.setattr(export_api, "_open_in_explorer", lambda folder: False)
+    monkeypatch.setattr(export_api, "_show_logs_folder", lambda folder: False)
 
     def start(settings_overrides, raw_settings=None, tokens=None):
         mgr = ConfigManager(tmp_path)

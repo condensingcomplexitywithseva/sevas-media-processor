@@ -20,6 +20,47 @@ def get_safe_path(path_obj: Path) -> str:
     return safe_path
 
 
+def path_setting_text(value: object) -> str:
+    text = str(value or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        text = text[1:-1].strip()
+    return text
+
+
+_FORBIDDEN_IN_NAMES = re.compile(r'[<>:"|?*\x00-\x1f]')
+
+
+def folder_setting_problem(text: str) -> str | None:
+    if text in ("", "."):
+        return "err_folder_empty"
+    text = plain_path(text)
+    if re.match(r"[A-Za-z]:", text):
+        text = text[2:]
+    if _FORBIDDEN_IN_NAMES.search(text):
+        return "err_invalid_path"
+    for name in re.split(r"[\\/]", text):
+        if name not in ("", ".", "..") and name != name.rstrip(" ."):
+            return "err_invalid_path"
+    return None
+
+
+def picker_start_folder(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    value = plain_path(path_setting_text(value))
+    try:
+        folder = Path(os.path.abspath(value))
+    except (OSError, ValueError):
+        return ""
+    for candidate in (folder, *folder.parents):
+        try:
+            if candidate.is_dir():
+                return str(candidate)
+        except (OSError, ValueError):
+            continue
+    return ""
+
+
 SOURCE_HASH_CHUNK_BYTES = 1 << 20
 
 
@@ -47,6 +88,14 @@ def source_sha256(path: Path, stop=None) -> str | None:
 _LONG_PATH_PREFIX = "\\\\?\\"
 _LONG_PATH_UNC_PREFIX = "\\\\?\\UNC\\"
 _UNC_ROOT = "\\\\"
+
+
+def plain_path(text: str) -> str:
+    if text.startswith(_LONG_PATH_UNC_PREFIX):
+        return _UNC_ROOT + text[len(_LONG_PATH_UNC_PREFIX):]
+    if text.startswith(_LONG_PATH_PREFIX):
+        return text[len(_LONG_PATH_PREFIX):]
+    return text
 
 
 def _as_repr_escaped(text: str) -> str:
@@ -135,7 +184,7 @@ def text_looks_binary(text: str) -> bool:
 
 def read_prompt(value: str, mode: str) -> str:
     if mode == "FILE" and value.strip():
-        with open(get_safe_path(Path(value)), encoding="utf-8") as f:
+        with open(get_safe_path(Path(path_setting_text(value))), encoding="utf-8") as f:
             content = f.read()
         if text_looks_binary(content):
             raise ValueError(f"prompt file is not text (control characters): {value}")
