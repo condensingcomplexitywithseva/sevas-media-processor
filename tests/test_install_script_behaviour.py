@@ -10,13 +10,15 @@ from pathlib import Path
 
 import pytest
 
+import setup_answers
 from test_readme_step_lists import readme_lists
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_SCRIPT = REPO_ROOT / "install.txt"
 README = REPO_ROOT / "README.md"
 STEP_5_MARKER = 'Write-Host "6/6'
-FROM_PYPI = "1\n\n\n"
+MIRROR = "https://mirror.corp.test/simple/"
+SOURCE = f"--isolated --disable-pip-version-check --index-url {MIRROR}"
 VERSION_PROBE = re.compile(r"function Get-PythonVersion \{\n.*?\n\}\n", re.S)
 DESKTOP_LOOKUP = "[Environment]::GetFolderPath('Desktop')"
 SHORTCUT_NAME = "Seva's Media Processor.lnk"
@@ -58,25 +60,24 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="install.txt is 
 POWERSHELL = shutil.which("powershell.exe")
 
 
-def supported_minors():
-    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    listed = re.search(r"^\$SupportedMinors\s*=\s*@\(([\d,\s]+)\)", text, re.M)
+def script_text(app_root=REPO_ROOT):
+    return (app_root / "install.txt").read_text(encoding="utf-8")
+
+
+def supported_minors(app_root=REPO_ROOT):
+    listed = re.search(r"^\$SupportedMinors\s*=\s*@\(([\d,\s]+)\)", script_text(app_root), re.M)
     assert listed
     return [int(minor) for minor in listed.group(1).split(",")]
 
 
-def auto_install_minor():
-    found = re.search(r"^\$AutoInstallMinor\s*=\s*(\d+)", INSTALL_SCRIPT.read_text(encoding="utf-8"), re.M)
+def auto_install_minor(app_root=REPO_ROOT):
+    found = re.search(r"^\$AutoInstallMinor\s*=\s*(\d+)", script_text(app_root), re.M)
     assert found
     return int(found.group(1))
 
 
-def script_text():
-    return INSTALL_SCRIPT.read_text(encoding="utf-8")
-
-
-def script_body():
-    lines = script_text().splitlines()
+def script_body(text=None):
+    lines = (script_text() if text is None else text).splitlines()
     opens = [i for i, line in enumerate(lines) if line == "& {"]
     assert len(opens) == 1, f"expected one '& {{' line, found {len(opens)}"
     assert lines[-1] == "}", f"the script must end with the block's '}}', not {lines[-1]!r}"
@@ -85,10 +86,18 @@ def script_body():
     return lines[opens[0] + 1:-1]
 
 
-def split_at_step_5():
-    lines = script_body()
+def split_at_step_5(text=None):
+    lines = script_body(text)
     index = next(i for i, line in enumerate(lines) if line.startswith(STEP_5_MARKER))
     return "\n".join(lines[:index]) + "\n", "\n".join(lines[index:]) + "\n"
+
+
+def mirror_answers(mirror_choice=setup_answers.MIRROR_CHOICE, mirror=MIRROR):
+    return f"{mirror_choice}{mirror}\n\n\n"
+
+
+def installed_with(folder, requirements="requirements.lock"):
+    return [f"install {SOURCE} --upgrade pip", f"install {SOURCE} -r {folder}\\{requirements}"]
 
 
 def run_powershell(script_path, cwd, env, timeout=420, stdin="\n\n\n"):
@@ -101,8 +110,10 @@ def run_powershell(script_path, cwd, env, timeout=420, stdin="\n\n\n"):
 
 class Toolbox:
 
-    def __init__(self, root):
+    def __init__(self, root, app_root=REPO_ROOT, mirror_choice=setup_answers.MIRROR_CHOICE, answers=None):
         self.root = root
+        self.app_root = app_root
+        self.answers = mirror_answers(mirror_choice) if answers is None else answers
         base_python = Path(sys.base_prefix) / "python.exe"
         assert base_python.exists(), base_python
         fake_pip = root / "fakepip" / "pip"
@@ -127,7 +138,7 @@ class Toolbox:
             "ProgramFiles": str(root / "Program Files"),
             "PYTHONPATH": str(fake_pip.parent),
         })
-        self.steps_1_to_4, self.step_5 = split_at_step_5()
+        self.steps_1_to_4, self.step_5 = split_at_step_5(script_text(app_root))
         self.fresh_folder = self.app_folder("fresh")
         self.fresh_log = self.root / "fresh_pip_calls.log"
         self.fresh_result = self.run(self.fresh_folder, self.fresh_log)
@@ -138,7 +149,7 @@ class Toolbox:
         if app_files:
             for filename in ("install.txt", "settings.example.json",
                              "requirements.lock", "requirements_no_version.txt"):
-                shutil.copy2(REPO_ROOT / filename, folder / filename)
+                shutil.copy2(self.app_root / filename, folder / filename)
             (folder / "src").mkdir()
             (folder / "src" / "main.py").write_text("", encoding="utf-8")
         steps = self.steps_1_to_4
@@ -151,9 +162,10 @@ class Toolbox:
             shutil.copytree(self.fresh_folder / "venv", folder / "venv")
         return folder
 
-    def run(self, folder, pip_log, pip_exit=0, stdin=FROM_PYPI, env=None):
+    def run(self, folder, pip_log, pip_exit=0, stdin=None, env=None):
         env = {**self.base_env, **(env or {}), "FAKE_PIP_LOG": str(pip_log), "FAKE_PIP_EXIT": str(pip_exit)}
-        return run_powershell(folder / "install_steps_1_to_4.ps1", folder, env, stdin=stdin)
+        return run_powershell(folder / "install_steps_1_to_4.ps1", folder, env,
+                              stdin=self.answers if stdin is None else stdin)
 
     def no_python_env(self, fakebin):
         windows = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"))
@@ -167,16 +179,20 @@ class Toolbox:
         return env
 
 
-@pytest.fixture(scope="module")
-def toolbox(tmp_path_factory):
+def make_toolbox(tmp_path_factory, app_root=REPO_ROOT, mirror_choice=setup_answers.MIRROR_CHOICE):
     if POWERSHELL is None:
         pytest.skip("powershell.exe not found")
-    if sys.version_info[:2] not in [(3, minor) for minor in supported_minors()]:
+    if sys.version_info[:2] not in [(3, minor) for minor in supported_minors(app_root)]:
         pytest.skip(
-            f"install.txt supports Python 3.{supported_minors()}; this interpreter is "
+            f"install.txt supports Python 3.{supported_minors(app_root)}; this interpreter is "
             f"{sys.version_info[:2]} and the script would prompt"
         )
-    return Toolbox(tmp_path_factory.mktemp("install_sandbox"))
+    return Toolbox(tmp_path_factory.mktemp("install_sandbox"), app_root, mirror_choice)
+
+
+@pytest.fixture(scope="module")
+def toolbox(tmp_path_factory):
+    return make_toolbox(tmp_path_factory)
 
 
 def pip_calls(log):
@@ -194,7 +210,7 @@ def test_a_fresh_folder_gets_venv_folders_settings_and_the_lock_installed(toolbo
     assert (folder / "input").is_dir() and (folder / "output").is_dir()
     assert (folder / "settings.json").read_bytes() == (folder / "settings.example.json").read_bytes()
     calls = pip_calls(toolbox.fresh_log)
-    assert calls == ["install --upgrade pip", f"install -r {folder}\\requirements.lock"], calls
+    assert calls == installed_with(folder), calls
 
 
 def test_an_updated_folder_keeps_the_users_files_untouched(toolbox):
@@ -217,9 +233,7 @@ def test_an_updated_folder_keeps_the_users_files_untouched(toolbox):
     assert "Created settings.json" not in result.stdout
     assert "Created empty" not in result.stdout
     assert (folder / "venv" / "pyvenv.cfg").stat().st_mtime_ns == stamp
-    assert pip_calls(toolbox.root / "updated_pip_calls.log") == [
-        "install --upgrade pip", f"install -r {folder}\\requirements.lock",
-    ]
+    assert pip_calls(toolbox.root / "updated_pip_calls.log") == installed_with(folder)
 
 
 def test_outside_the_extracted_folder_with_nothing_dragged_in_it_creates_nothing(toolbox):
@@ -241,13 +255,13 @@ def test_dragging_install_txt_in_installs_into_its_folder(toolbox):
     target = toolbox.app_folder("dragged [2] folder", with_venv=True)
     wrong = started_in / "install_steps_1_to_4.ps1"
     log = toolbox.root / "dragged_pip_calls.log"
-    result = toolbox.run(started_in, log, stdin=f'"{wrong}"\n"{target}\\install.txt"\n' + FROM_PYPI)
+    result = toolbox.run(started_in, log, stdin=f'"{wrong}"\n"{target}\\install.txt"\n' + toolbox.answers)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "That is not the install.txt from the extracted folder." in result.stdout
     assert f"Installing into: {target}\n" in result.stdout
     assert (target / "input").is_dir() and (target / "settings.json").exists()
     assert sorted(p.name for p in started_in.iterdir()) == ["install_steps_1_to_4.ps1"]
-    assert pip_calls(log) == ["install --upgrade pip", f"install -r {target}\\requirements.lock"]
+    assert pip_calls(log) == installed_with(target)
 
 
 def fake_winget(tmp_path, log, target):
@@ -264,36 +278,6 @@ def fake_winget(tmp_path, log, target):
     return fakebin
 
 
-def test_a_computer_without_python_gets_it_from_winget_when_asked_and_continues(toolbox, tmp_path):
-    minor = auto_install_minor()
-    folder = toolbox.app_folder("no python")
-    local = tmp_path / "localappdata"
-    target = local / "Programs" / "Python" / f"Python3{minor}"
-    winget_log = tmp_path / "winget_calls.log"
-    fakebin = fake_winget(tmp_path, winget_log, target)
-    pip_log = tmp_path / "no_python_pip_calls.log"
-    env = {**toolbox.no_python_env(fakebin), "LOCALAPPDATA": str(local)}
-    if sys.version_info[:2] != (3, minor):
-        pytest.skip(f"the fake winget links this interpreter, which is not 3.{minor}")
-    try:
-        result = toolbox.run(folder, pip_log, stdin="1\n" + FROM_PYPI, env=env)
-    finally:
-        if target.exists():
-            os.rmdir(target)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "PYTHON 3.13 OR 3.14 IS NEEDED" in result.stdout
-    assert "No Python was found on this computer." in result.stdout
-    assert "3 - Continue" not in result.stdout, "the own-risk choice is only for a newer Python"
-    assert f"Installing Python 3.{minor} with winget" in result.stdout
-    assert winget_log.read_text(encoding="utf-8").startswith(
-        f"install --id Python.Python.3.{minor} --source winget --silent")
-    assert f"at {target}\\python.exe. Continuing." in result.stdout
-    assert "paste the text again" not in result.stdout
-    assert "Virtual environment created" in result.stdout
-    assert (folder / "venv" / "pyvenv.cfg").exists()
-    assert pip_calls(pip_log) == ["install --upgrade pip", f"install -r {folder}\\requirements.lock"]
-
-
 def test_the_no_python_sandbox_refuses_a_reachable_python(toolbox, tmp_path):
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
@@ -301,26 +285,6 @@ def test_the_no_python_sandbox_refuses_a_reachable_python(toolbox, tmp_path):
     shutil.copy2(Path(sys.base_prefix) / "python.exe", fakebin / "python.exe")
     with pytest.raises(AssertionError, match="still reaches"):
         toolbox.no_python_env(fakebin)
-
-
-@pytest.mark.parametrize("answer, shown", [
-    ("2\n", "INSTALL PYTHON YOURSELF"),
-    ("\n", "Nothing was chosen, so nothing was installed."),
-])
-def test_a_computer_without_python_can_install_it_by_hand_instead(toolbox, tmp_path, answer, shown):
-    folder = toolbox.app_folder(f"no python by hand {len(answer)}")
-    winget_log = tmp_path / "winget_calls.log"
-    fakebin = fake_winget(tmp_path, winget_log, tmp_path / "unused" / "Python")
-    pip_log = tmp_path / "pip_calls.log"
-    result = toolbox.run(folder, pip_log, stdin=answer, env=toolbox.no_python_env(fakebin))
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert shown in result.stdout
-    if answer == "2\n":
-        assert "https://www.python.org/downloads/windows/" in result.stdout
-        assert "paste the text of" in result.stdout and "install.txt again" in result.stdout
-    assert not winget_log.exists()
-    assert not (folder / "venv").exists() and not (folder / "input").exists()
-    assert pip_calls(pip_log) == []
 
 
 def test_python_3_13_and_3_14_both_install_the_tested_lock(toolbox):
@@ -331,35 +295,19 @@ def test_python_3_13_and_3_14_both_install_the_tested_lock(toolbox):
         assert result.returncode == 0, result.stdout + result.stderr
         assert f"Found Python {version} at " in result.stdout
         assert "IS NEEDED" not in result.stdout
-        assert pip_calls(log) == ["install --upgrade pip", f"install -r {folder}\\requirements.lock"]
+        assert pip_calls(log) == installed_with(folder)
 
 
 def test_a_newer_python_may_continue_at_own_risk_with_unpinned_libraries(toolbox, tmp_path):
     folder = toolbox.app_folder("python 3.15", with_venv=True, reported_version="3.15.0")
     log = toolbox.root / "python_3.15_pip_calls.log"
-    mirror = "https://mirror.example.test/simple/"
-    result = toolbox.run(folder, log, stdin=f"3\n2\n{mirror}\n")
+    choice = setup_answers.OWN_RISK_CHOICE
+    result = toolbox.run(folder, log, stdin=f"{choice}\n" + toolbox.answers)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Found Python 3.15.0, which this application is not tested with." in result.stdout
-    assert "3 - Continue with Python 3.15.0 at my own risk" in result.stdout
+    assert f"{choice} - Continue with Python 3.15.0 at my own risk" in result.stdout
     assert "Continuing with Python 3.15.0 at your own risk" in result.stdout
-    source = f"--isolated --disable-pip-version-check --index-url {mirror}"
-    assert pip_calls(log) == [f"install {source} --upgrade pip",
-                              f"install {source} -r {folder}\\requirements_no_version.txt"]
-
-
-def test_an_older_python_gets_no_own_risk_choice(toolbox, tmp_path):
-    folder = toolbox.app_folder("python 3.12", with_venv=True, reported_version="3.12.9")
-    winget_log = tmp_path / "winget_calls.log"
-    fakebin = fake_winget(tmp_path, winget_log, tmp_path / "unused" / "Python")
-    env = {"PATH": toolbox.base_env["PATH"] + os.pathsep + str(fakebin)}
-    result = toolbox.run(folder, toolbox.root / "python_3.12_pip_calls.log", stdin="3\n2\n", env=env)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "Found Python 3.12.9, which this application is not tested with." in result.stdout
-    assert "3 - Continue" not in result.stdout
-    assert "Please type 1 or 2." in result.stdout
-    assert "INSTALL PYTHON YOURSELF" in result.stdout
-    assert not winget_log.exists()
+    assert pip_calls(log) == installed_with(folder, "requirements_no_version.txt")
 
 
 def test_a_package_mirror_is_the_only_source_for_every_pip_call(toolbox):
@@ -368,7 +316,7 @@ def test_a_package_mirror_is_the_only_source_for_every_pip_call(toolbox):
     folder = toolbox.app_folder("mirror", with_venv=True)
     log = toolbox.root / "mirror_pip_calls.log"
     refused = "nexus.corp.test\nhttp://pypi-mirror.corp.test:8080/simple\n"
-    result = toolbox.run(folder, log, stdin=f"2\n{refused}{typed}\n")
+    result = toolbox.run(folder, log, stdin=f"{setup_answers.MIRROR_CHOICE}{refused}{typed}\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.count("The address must start with https://.") == 2, result.stdout
     assert f"The libraries will come only from {typed}" in result.stdout
@@ -419,8 +367,6 @@ def test_a_failed_pip_stops_the_script_honestly(toolbox):
     assert not (folder / "input").exists() and not (folder / "settings.json").exists()
 
 
-MIRROR = "https://mirror.corp.test/simple/"
-FROM_MIRROR = f"2\n{MIRROR}\n"
 LOG_PREFIX = "2026-10-25T19:27:22,244 "
 FETCH = LOG_PREFIX + "Could not fetch URL https://mirror.corp.test/simple/pip/: "
 PIP_LOG_LINES = {
@@ -448,7 +394,7 @@ PIP_LOG_LINES = {
 }
 
 
-def run_with_pip_log(toolbox, name, lines, pip_exit, stdin=FROM_MIRROR, env=None):
+def run_with_pip_log(toolbox, name, lines, pip_exit, stdin=None, env=None):
     folder = toolbox.app_folder(name, with_venv=True)
     log = toolbox.root / f"{name}_pip_calls.log"
     text = "".join(PIP_LOG_LINES[line] + "\n" for line in lines)
@@ -461,7 +407,7 @@ def test_every_pip_call_runs_with_windows_trust_and_its_own_log(toolbox, tmp_pat
     assert " -m pip" not in script_text(), "every pip call goes through Invoke-Pip"
     for version, injected in (("0.10.4", True), ("0.9.1", True), ("0.8.0", False)):
         trace = tmp_path / f"trace_{version}.log"
-        _, log, result = run_with_pip_log(toolbox, f"trust {version}", [], 0, stdin=FROM_PYPI,
+        _, log, result = run_with_pip_log(toolbox, f"trust {version}", [], 0,
                                           env={"FAKE_PIP_TRACE": str(trace), "FAKE_TRUSTSTORE_VERSION": version})
         assert result.returncode == 0, result.stdout + result.stderr
         assert len(pip_calls(log)) == 2
@@ -490,12 +436,9 @@ def test_pip_stops_with_the_cause_its_log_names(toolbox, lines, pip_exit, step, 
     assert not (folder / "settings.json").exists()
 
 
-def test_a_missing_library_box_names_the_mirror_only_in_mirror_mode(toolbox):
+def test_a_missing_library_box_explains_the_mirror(toolbox):
     _, _, mirror = run_with_pip_log(toolbox, "missing on mirror", ["missing"], 1)
-    _, _, pypi = run_with_pip_log(toolbox, "missing on pypi", ["missing"], 1, stdin=FROM_PYPI)
     assert "usually ends in" in mirror.stdout
-    assert "av==18.0.0 was not found at pypi.org." in pypi.stdout
-    assert "usually ends in" not in pypi.stdout
 
 
 @pytest.mark.parametrize("lines", [["retried"], ["not_found"], ["fetched", "extra_unreachable"]],
@@ -646,7 +589,7 @@ def test_every_native_call_is_followed_by_the_exit_code_check():
         if not following or not following[0].startswith(("Stop-OnFailure", "Stop-OnPipFailure")):
             offenders.append(f"line {index + 1}: {line.strip()}")
     assert not offenders, "native calls without Stop-OnFailure:\n  " + "\n  ".join(offenders)
-    assert sum(1 for line in lines if native.match(line)) >= 3, "the sweep saw too few native calls"
+    assert sum(1 for line in lines if native.match(line)) >= 2, "the sweep saw too few native calls"
 
 
 def exits_without_a_pause(text):

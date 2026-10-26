@@ -4,7 +4,9 @@
 import json
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[2] / "src"
+from fake_llm.harness import ready_ai
+
+SRC =Path(__file__).resolve().parents[2] / "src"
 APP_WIDTH = 1264
 APP_HEIGHT = 800
 
@@ -12,7 +14,7 @@ DORMANT_GARBAGE = {
     "LLM_OUTPUT_COLUMNS": "page",
     "LLM_JSON_MAX_ATTEMPTS": "lots",
 }
-AI_OFF_LOCAL = {"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDER": "ollama"}
+AI_OFF_LOCAL = {**ready_ai(), "ENABLE_LLM_INFERENCE": False}
 
 
 def banner_visible(page):
@@ -84,7 +86,7 @@ def discovered_locales():
 
 
 def test_the_two_stop_toggles_are_distinguishable_in_every_locale(open_page):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"})
+    page = open_page(ready_ai())
     page.evaluate("window.switchTab('ai')")
     page.wait_for_timeout(400)
 

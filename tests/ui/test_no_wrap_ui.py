@@ -4,15 +4,18 @@
 
 from pathlib import Path
 
+from fake_llm.harness import ready_ai
+
 LANGS = tuple(sorted(
     p.stem for p in (Path(__file__).resolve().parents[2] / "src" / "locales").glob("*.json")
 ))
 APP_WIDTH = 1264
 APP_HEIGHT = 800
 
-AI_TOKEN_ERROR = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai"}
+AI_ONE_ERROR = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "custom",
+                "LLM_PROVIDERS": {"custom": {"model": "a-model"}}}
 
-AI_OFF_GARBAGE_RETRIES = {"ENABLE_LLM_INFERENCE": False, "LLM_MAX_RETRIES": "abc"}
+AI_OFF_GARBAGE_RETRIES = {**ready_ai(), "ENABLE_LLM_INFERENCE": False, "LLM_MAX_RETRIES": "abc"}
 
 ROWS_SINGLE_LINE = """
 () => {
@@ -49,15 +52,14 @@ def assert_banner_rows_single_line(page, scenario, expected_rows):
 
 
 def test_disk_error_banner_fits_on_one_line(open_page):
-    page = open_page(AI_TOKEN_ERROR)
+    page = open_page(AI_ONE_ERROR)
     page.set_viewport_size({"width": APP_WIDTH, "height": APP_HEIGHT})
     page.wait_for_timeout(200)
     assert_banner_rows_single_line(page, "disk errors", expected_rows=2)
 
 
 def test_failed_apply_banner_fits_on_one_line(open_page):
-    page = open_page(AI_OFF_GARBAGE_RETRIES,
-                     tokens={"openai": "sk-fake0123456789abcdef0123456789abcdef"})
+    page = open_page(AI_OFF_GARBAGE_RETRIES)
     page.set_viewport_size({"width": APP_WIDTH, "height": APP_HEIGHT})
     page.wait_for_timeout(200)
 

@@ -20,8 +20,11 @@ from config_validator import (
 )
 
 IDENTITY_URL = "http://127.0.0.1:9/v1/chat/completions"
+IDENTITY_ENTRY = {"url": IDENTITY_URL, "model": "identity-model"}
 IDENTITY_TOKEN = "identity-token-a"
 PROMPT_FILE_TEXT = "Describe the receipt"
+
+PUBLIC_EDITION_CASES = {"LLM_PROVIDER"}
 
 
 def _identity(tmp_path, **overrides):
@@ -30,7 +33,7 @@ def _identity(tmp_path, **overrides):
     (tmp_path / "prompt.txt").write_text(PROMPT_FILE_TEXT, encoding="utf-8")
     values: dict[str, Any] = {
         "INPUT_FOLDER_PATH": "{tmp}/input", "OUTPUT_FOLDER_PATH": "{tmp}/output",
-        "ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai", "LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL}},
+        "ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "custom", "LLM_PROVIDERS": {"custom": IDENTITY_ENTRY},
     }
     values.update(overrides)
     values = {name: value.replace("{tmp}", str(tmp_path)) if isinstance(value, str) else value
@@ -48,8 +51,7 @@ SETTING_CASES: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {
     "START_OVER": [({}, {"START_OVER": False})],
     "NO_RETRY_STATUSES": [({}, {"NO_RETRY_STATUSES": ["ok", "fail"]})],
     "ENABLE_LLM_INFERENCE": [({}, {"ENABLE_LLM_INFERENCE": False})],
-    "LLM_PROVIDER": [({}, {"LLM_PROVIDER": "claude"})],
-    "LLM_PROVIDERS": [({}, {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL, "model": "another-model"}}})],
+    "LLM_PROVIDERS": [({}, {"LLM_PROVIDERS": {"custom": {**IDENTITY_ENTRY, "model": "another-model"}}})],
     "LLM_USER_PROMPT": [({}, {"LLM_USER_PROMPT": "another task"})],
     "LLM_USER_PROMPT_MODE": [({"LLM_USER_PROMPT": "{tmp}/prompt.txt"}, {"LLM_USER_PROMPT_MODE": "FILE"})],
     "LLM_SYSTEM_PROMPT": [({}, {"LLM_SYSTEM_PROMPT": "another role"})],
@@ -65,7 +67,7 @@ SETTING_CASES: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {
     "LLM_MAX_RETRIES": [({}, {"LLM_MAX_RETRIES": 9})],
     "LLM_TIMEOUT_SECONDS": [({}, {"LLM_TIMEOUT_SECONDS": 7})],
     "LLM_RETRY_SLEEP_SECONDS": [({}, {"LLM_RETRY_SLEEP_SECONDS": 11})],
-    "ENV_TOKENS": [({}, {"ENV_TOKENS": {"OPENAI_TOKEN": "identity-token-b"}})],
+    "ENV_TOKENS": [({}, {"ENV_TOKENS": {"CUSTOM_TOKEN": "identity-token-b"}})],
     "MAX_DIMENSION": [({}, {"MAX_DIMENSION": 1000})],
     "JPEG_QUALITY": [({}, {"JPEG_QUALITY": 80})],
     "PDF_SCALE": [({}, {"PDF_SCALE": 3})],
@@ -113,7 +115,7 @@ PROVIDER_CASES: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {
 
 
 def _provider_identity(tmp_path, fields):
-    return _identity(tmp_path, LLM_PROVIDERS={"openai": {"url": IDENTITY_URL, **fields}})
+    return _identity(tmp_path, LLM_PROVIDERS={"custom": {**IDENTITY_ENTRY, **fields}})
 
 
 def test_every_setting_and_provider_field_is_classified_exactly_once():
@@ -135,14 +137,15 @@ def test_the_classification_guard_names_unclassified_duplicated_and_stale_fields
 
 
 def test_every_field_has_an_effect_case_that_edits_it():
-    assert set(SETTING_CASES) == set(Settings.model_fields)
+    assert set(SETTING_CASES) | PUBLIC_EDITION_CASES == set(Settings.model_fields)
+    assert not set(SETTING_CASES) & PUBLIC_EDITION_CASES
     assert set(PROVIDER_CASES) == set(ProviderConfig.model_fields)
     for cases in (SETTING_CASES, PROVIDER_CASES):
         for field, field_cases in cases.items():
             assert field_cases and all(field in edit for _, edit in field_cases), field
 
 
-@pytest.mark.parametrize("field", sorted(Settings.model_fields))
+@pytest.mark.parametrize("field", sorted(set(Settings.model_fields) - PUBLIC_EDITION_CASES))
 def test_a_setting_changes_the_run_identity_exactly_when_classified_as_identity(tmp_path, field):
     for base, edit in SETTING_CASES[field]:
         changed = _identity(tmp_path, **{**base, **edit}) != _identity(tmp_path, **base)

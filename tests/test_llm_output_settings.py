@@ -33,12 +33,13 @@ def validate(mgr, payload):
 
 
 def ai_on(tmp_path, **overrides) -> dict[str, Any]:
+    from fake_llm.harness import ready_ai
     payload: dict[str, Any] = {
         "INPUT_FOLDER_PATH": str(tmp_path / "input"),
         "OUTPUT_FOLDER_PATH": str(tmp_path / "output"),
-        "ENABLE_LLM_INFERENCE": True,
-        "LLM_PROVIDER": "ollama",
+        **ready_ai(),
     }
+    payload["LLM_PROVIDERS"].update(overrides.pop("LLM_PROVIDERS", {}))
     payload.update(overrides)
     return payload
 
@@ -225,12 +226,12 @@ def test_abort_toggle_is_a_strict_bool(mgr, tmp_path):
 def test_new_fields_and_provider_scoping_stay_independent(mgr, tmp_path):
     errors, _ = validate(mgr, ai_on(
         tmp_path,
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
+        LLM_PROVIDERS={"left-over-provider": {"max_tokens": "abc"}},
         LLM_OUTPUT_COLUMNS="genre,answer"))
     assert errors == {}
     errors, _ = validate(mgr, ai_on(
         tmp_path,
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
+        LLM_PROVIDERS={"left-over-provider": {"max_tokens": "abc"}},
         LLM_OUTPUT_COLUMNS="page"))
     assert set(errors) == {"LLM_OUTPUT_COLUMNS"}
 

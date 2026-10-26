@@ -47,6 +47,7 @@ PROVIDER_FIELDS = frozenset({
 AUTH = {"X-App-Token": SESSION_TOKEN}
 FUTURE_TOP = {"SETTING_FROM_THE_FUTURE": 42, "ANOTHER_FUTURE_SWITCH": {"nested": ["x"]}}
 FUTURE_FIELD = {"FUTURE_PROVIDER_FIELD": "keep me"}
+UNSELECTED = "unselected-provider"
 
 
 @pytest.fixture
@@ -78,9 +79,9 @@ def old_file(tmp_path, **overrides) -> dict[str, Any]:
         "INPUT_FOLDER_PATH": str(tmp_path / "input"),
         "OUTPUT_FOLDER_PATH": str(tmp_path / "output"),
         "ENABLE_LLM_INFERENCE": True,
-        "LLM_PROVIDER": "ollama",
+        "LLM_PROVIDER": "custom",
         "LLM_PROVIDERS": {
-            "ollama": {"url": "http://localhost:11434/v1/chat/completions", "model": "old-model"},
+            "custom": {"url": "http://127.0.0.1:9/v1/chat/completions", "model": "old-model"},
         },
     }
     payload.update(overrides)
@@ -89,8 +90,8 @@ def old_file(tmp_path, **overrides) -> dict[str, Any]:
 
 def newer_file(tmp_path, ai_enabled) -> dict[str, Any]:
     payload = old_file(tmp_path, ENABLE_LLM_INFERENCE=ai_enabled, **FUTURE_TOP)
-    payload["LLM_PROVIDERS"]["ollama"].update(FUTURE_FIELD)
-    payload["LLM_PROVIDERS"]["claude"] = {"model": "claude-future", **FUTURE_FIELD}
+    payload["LLM_PROVIDERS"]["custom"].update(FUTURE_FIELD)
+    payload["LLM_PROVIDERS"][UNSELECTED] = {"model": "unselected-future", **FUTURE_FIELD}
     payload["LLM_PROVIDERS"]["newprovider"] = {"url": "http://x", "model": "y", **FUTURE_FIELD}
     return payload
 
@@ -109,7 +110,7 @@ def flatten(ob, prefix=""):
 def assert_future_keys_present(saved):
     for key, value in FUTURE_TOP.items():
         assert saved[key] == value, (key, saved.get(key))
-    for provider in ("ollama", "claude", "newprovider"):
+    for provider in ("custom", UNSELECTED, "newprovider"):
         assert saved["LLM_PROVIDERS"][provider]["FUTURE_PROVIDER_FIELD"] == "keep me", provider
     assert saved["LLM_PROVIDERS"]["newprovider"]["model"] == "y"
 
@@ -134,7 +135,7 @@ def test_an_older_settings_file_loads_with_defaults_for_the_missing_keys(mgr, tm
     assert active.max_tokens_field == ProviderConfig.model_fields["max_tokens_field"].default
     merged, errors = mgr.load_for_ui()
     assert errors == {}
-    assert merged["LLM_PROVIDERS"]["ollama"]["model"] == "old-model"
+    assert merged["LLM_PROVIDERS"]["custom"]["model"] == "old-model"
     assert merged["JPEG_QUALITY"] == Settings.model_fields["JPEG_QUALITY"].default
 
 
@@ -157,7 +158,7 @@ def test_the_loader_save_keeps_every_unknown_key_at_both_levels(mgr, tmp_path, a
     mgr.save_settings(mgr.load_strict())
     saved = read_settings(tmp_path)
     assert_future_keys_present(saved)
-    assert saved["LLM_PROVIDERS"]["ollama"]["model"] == "old-model"
+    assert saved["LLM_PROVIDERS"]["custom"]["model"] == "old-model"
     assert saved["ENABLE_LLM_INFERENCE"] is ai_enabled
 
 
@@ -252,7 +253,7 @@ def test_a_retired_key_is_dropped_on_save_while_a_future_key_is_kept(mgr, tmp_pa
     for ai_enabled in (True, False):
         payload = newer_file(tmp_path, ai_enabled)
         payload["OLD_SETTING"] = "gone soon"
-        for provider in ("ollama", "claude"):
+        for provider in ("custom", UNSELECTED):
             payload["LLM_PROVIDERS"][provider]["old_field"] = "gone soon"
         write_settings(tmp_path, payload)
         _, errors = mgr.load_for_ui()
@@ -345,7 +346,7 @@ def test_control_edits_preserve_opaque_data_and_missing_fields(mgr, tmp_path, ai
     foreign = {"hasOwnProperty": {}, "__proto__": {"literal.key": 9007199254740993},
                "list": [False, None, {}, {"a.b": []}]}
     payload = old_file(tmp_path, ENABLE_LLM_INFERENCE=ai_enabled, **{"future.key": foreign})
-    payload["LLM_PROVIDERS"]["claude"] = {"max_tokens": "00123", "require_max_tokens": "false", "future": foreign}
+    payload["LLM_PROVIDERS"][UNSELECTED] = {"max_tokens": "00123", "require_max_tokens": "false", "future": foreign}
     payload["LLM_PROVIDERS"]["future.provider"] = foreign
     write_settings(tmp_path, payload)
     client = create_app().test_client()
@@ -366,7 +367,7 @@ def test_control_edits_preserve_opaque_data_and_missing_fields(mgr, tmp_path, ai
 
 @pytest.mark.parametrize("edits", [[], None, {"LLM_PROVIDERS": {}}, {"ENV_TOKENS": {}},
                                   {"future": 1}, {"LLM_PROVIDERS.unknown.model": "x"},
-                                  {"LLM_PROVIDERS.claude.unknown": 1}, {"ENV_TOKENS.unknown": "fake"}])
+                                  {"LLM_PROVIDERS.custom.unknown": 1}, {"ENV_TOKENS.unknown": "fake"}])
 def test_unrecognized_edit_paths_are_refused_without_writes(mgr, tmp_path, edits):
     write_settings(tmp_path, old_file(tmp_path, ENABLE_LLM_INFERENCE=False))
     before = mgr.settings_path.read_bytes()
@@ -380,24 +381,24 @@ def test_edit_validation_is_atomic_and_tokens_stay_separate(mgr, tmp_path):
     write_settings(tmp_path, old_file(tmp_path))
     before = mgr.settings_path.read_bytes()
     client = create_app().test_client()
-    changes = {"JPEG_QUALITY": "81", "LLM_PROVIDERS.ollama.max_tokens": "bad",
-               "ENV_TOKENS.openai": "sk-fake0123456789abcdef0123456789abcdef"}
+    changes = {"JPEG_QUALITY": "81", "LLM_PROVIDERS.custom.max_tokens": "bad",
+               "ENV_TOKENS.custom": "sk-fake0123456789abcdef0123456789abcdef"}
     response = client.post("/api/settings/commit", json={"edits": changes}, headers=AUTH)
     assert response.status_code == 400
-    assert "LLM_PROVIDERS.ollama.max_tokens" in response.get_json()["errors"]
+    assert "LLM_PROVIDERS.custom.max_tokens" in response.get_json()["errors"]
     assert mgr.settings_path.read_bytes() == before
     assert not mgr.env_path.exists()
-    changes["LLM_PROVIDERS.ollama.max_tokens"] = "123"
+    changes["LLM_PROVIDERS.custom.max_tokens"] = "123"
     response = client.post("/api/settings/commit", json={"edits": changes}, headers=AUTH)
     assert response.status_code == 200
     saved = read_settings(tmp_path)
     assert "ENV_TOKENS" not in saved
-    assert saved["LLM_PROVIDERS"]["ollama"]["max_tokens"] == 123
-    assert mgr.get_env_tokens()["OPENAI_TOKEN"] == changes["ENV_TOKENS.openai"]
+    assert saved["LLM_PROVIDERS"]["custom"]["max_tokens"] == 123
+    assert mgr.get_env_tokens()["CUSTOM_TOKEN"] == changes["ENV_TOKENS.custom"]
     for token in ("", "********"):
-        response = client.post("/api/settings/commit", json={"edits": {"ENV_TOKENS.openai": token}}, headers=AUTH)
+        response = client.post("/api/settings/commit", json={"edits": {"ENV_TOKENS.custom": token}}, headers=AUTH)
         assert response.status_code == 200
-        assert mgr.get_env_tokens()["OPENAI_TOKEN"] == changes["ENV_TOKENS.openai"]
+        assert mgr.get_env_tokens()["CUSTOM_TOKEN"] == changes["ENV_TOKENS.custom"]
 
 
 def test_edit_validation_refuses_corrupted_file(mgr):
@@ -424,13 +425,13 @@ def test_preservation_assertion_detects_provider_normalization(mgr, tmp_path, mo
     if restore_normalization:
         monkeypatch.setattr(config_loader, "SettingsAIDormant", NormalizingDormant)
     entry = {"max_tokens": "123", "require_max_tokens": "false"}
-    raw = old_file(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDERS={"claude": entry})
+    raw = old_file(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDERS={"custom": entry})
     obj, errors, _ = mgr.validate_draft(raw)
     assert not errors and obj is not None
     mgr.save_settings(obj)
 
     def assert_preserved():
-        assert read_settings(tmp_path)["LLM_PROVIDERS"] == {"claude": entry}
+        assert read_settings(tmp_path)["LLM_PROVIDERS"] == {"custom": entry}
 
     if restore_normalization:
         with pytest.raises(AssertionError):
@@ -442,7 +443,7 @@ def test_preservation_assertion_detects_provider_normalization(mgr, tmp_path, mo
 
 def test_unrelated_edits_do_not_import_tokens_from_settings_file(mgr, tmp_path):
     write_settings(tmp_path, old_file(tmp_path, ENABLE_LLM_INFERENCE=False,
-                                     ENV_TOKENS={"openai": "fake-not-a-token-update"}))
+                                     ENV_TOKENS={"custom": "fake-not-a-token-update"}))
     response = create_app().test_client().post(
         "/api/settings/commit", json={"edits": {"JPEG_QUALITY": "81"}}, headers=AUTH)
     assert response.status_code == 200

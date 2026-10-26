@@ -340,14 +340,16 @@ def test_backup_notice_only_offers_an_actionable_file(open_page, tmp_path, monke
 def test_token_instructions_are_truthful_before_save_and_after_wipe(open_page, tmp_path, token_state):
     import config_loader
 
-    tokens = None if token_state == 'absent' else {'openai': 'sk-fake0123456789abcdef0123456789abcdef'}
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'openai'}, tokens=tokens)
+    from fake_llm.harness import ready_ai
+
+    tokens = None if token_state == 'absent' else {'custom': 'sk-fake0123456789abcdef0123456789abcdef'}
+    page = open_page(ready_ai(), tokens=tokens)
     if token_state == 'wiped':
-        page.evaluate("() => { wipeToken('openai'); }")
+        page.evaluate("() => { wipeToken('custom'); }")
         with page.expect_response('**/api/settings/wipe_token'):
             page.click('#modal-ok')
-        page.wait_for_function('!rawOriginalState.ENV_TOKENS.openai')
-    assert bool(config_loader._manager.token_manager.get_tokens().get('OPENAI_TOKEN')) == (token_state == 'saved')
+        page.wait_for_function('!rawOriginalState.ENV_TOKENS.custom')
+    assert bool(config_loader._manager.token_manager.get_tokens().get('CUSTOM_TOKEN')) == (token_state == 'saved')
     if token_state == 'absent':
         assert not (tmp_path / '.env').exists()
     for locale in sorted((REPO_ROOT / 'src/locales').glob('*.json')):
@@ -360,7 +362,7 @@ def test_token_instructions_are_truthful_before_save_and_after_wipe(open_page, t
             instruction = {'en': 'save', 'ru': 'сохран'}.get(locale.stem)
             if instruction:
                 assert instruction in hint.lower()
-        assert page.locator('#prov_token_openai').get_attribute('placeholder') == (
+        assert page.locator('#prov_token_custom').get_attribute('placeholder') == (
             '********' if token_state == 'saved' else page.evaluate("getT('placeholder_token')"))
 
 
@@ -402,7 +404,7 @@ def test_lost_reset_reply_reports_uncertainty_after_real_reset(open_page, tmp_pa
 @pytest.mark.parametrize('operation,endpoint,confirmation', [
     ('startProcessing()', '**/api/process/start', False),
     ('stopProcessing()', '**/api/process/stop', False),
-    ('wipeToken("openai")', '**/api/settings/wipe_token', True),
+    ('wipeToken("custom")', '**/api/settings/wipe_token', True),
     ('clearLogs()', '**/api/export/clear_logs', True),
 ])
 @pytest.mark.parametrize('failure', ['disconnect', 'invalid_json'])

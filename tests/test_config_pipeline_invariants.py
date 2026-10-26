@@ -97,15 +97,6 @@ def test_business_errors_identical_with_and_without_type_errors(mgr, tmp_path):
     assert set(errors_types_bad) == set(errors_types_ok) | {"JPEG_QUALITY"}
 
 
-def test_business_errors_identical_for_ai_rules_too(mgr, tmp_path):
-    payload = base_paths(tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai")
-    _, errors_types_ok, _ = mgr.validate_draft(payload)
-    _, errors_types_bad, _ = mgr.validate_draft({**payload, "MAX_DIMENSION": "abc"})
-
-    assert errors_types_ok["ENV_TOKENS.openai"] == errors_types_bad["ENV_TOKENS.openai"]
-    assert set(errors_types_bad) == set(errors_types_ok) | {"MAX_DIMENSION"}
-
-
 
 def test_cold_and_warm_reads_agree(mgr, tmp_path):
     mgr.settings_path.write_text(
@@ -158,7 +149,7 @@ def test_error_catalogue_exact_shapes(mgr, tmp_path):
     empty_file.write_text("", encoding="utf-8")
     missing = str(tmp_path / "does_not_exist")
     ai = {"ENABLE_LLM_INFERENCE": True,
-              "ENV_TOKENS": {"openai": "sk-fake0123456789abcdef0123456789abcdef"}}
+              "ENV_TOKENS": {"custom": "sk-fake0123456789abcdef0123456789abcdef"}}
 
     cases = [
         ({"IMAGE_RANGE": "abc"}, "IMAGE_RANGE",
@@ -187,8 +178,6 @@ def test_error_catalogue_exact_shapes(mgr, tmp_path):
          {"type": "i18n", "value": "err_missing_url"}),
         ({**ai, "LLM_PROVIDER": "custom"}, "LLM_PROVIDERS.custom.model",
          {"type": "i18n", "value": "err_missing_model"}),
-        ({**ai, "LLM_PROVIDER": "openai", "ENV_TOKENS": {}}, "ENV_TOKENS.openai",
-         {"type": "i18n", "value": "err_missing_token"}),
         ({**ai, "LLM_PROVIDERS": "junk"}, "LLM_PROVIDER",
          {"type": "i18n", "value": "err_fix_ai_settings"}),
         ({**ai, "LLM_USER_PROMPT": "  "}, "LLM_USER_PROMPT",
@@ -249,7 +238,7 @@ def test_commit_is_all_or_nothing(client, mgr, tmp_path):
 def test_commit_never_writes_tokens_to_settings_json(client, mgr, tmp_path):
     resp = client.post_json(
         "/api/settings/commit",
-        base_paths(tmp_path, ENV_TOKENS={"openai": "sk-secret"}),
+        base_paths(tmp_path, ENV_TOKENS={"custom": "sk-secret"}),
     )
     assert resp.status_code == 200
     on_disk = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
@@ -257,66 +246,19 @@ def test_commit_never_writes_tokens_to_settings_json(client, mgr, tmp_path):
     assert "sk-secret" not in mgr.settings_path.read_text(encoding="utf-8")
 
 
-def test_commit_new_token_lands_in_env_file(client, mgr, tmp_path):
-    resp = client.post_json(
-        "/api/settings/commit",
-        base_paths(
-            tmp_path,
-            ENABLE_LLM_INFERENCE=True,
-            LLM_PROVIDER="openai",
-            ENV_TOKENS={"openai": "sk-new-token"},
-        ),
-    )
-    assert resp.status_code == 200
-    assert mgr.token_manager.get_tokens() == {"OPENAI_TOKEN": "sk-new-token"}
-    assert resp.get_json()["env_tokens"] == {"openai": "********"}
-
-
-@pytest.mark.parametrize("echoed_value", ["", "********"])
-def test_commit_masked_or_empty_token_changes_nothing(client, mgr, tmp_path, echoed_value):
-    mgr.token_manager.update_tokens({"openai": "sk-stored"})
-    resp = client.post_json(
-        "/api/settings/commit",
-        base_paths(
-            tmp_path,
-            ENABLE_LLM_INFERENCE=True,
-            LLM_PROVIDER="openai",
-            ENV_TOKENS={"openai": echoed_value},
-        ),
-    )
-    assert resp.status_code == 200, resp.get_json()
-    assert mgr.token_manager.get_tokens() == {"OPENAI_TOKEN": "sk-stored"}
-
-
 def test_real_token_updates_truth_table():
     from config_loader import real_token_updates
 
     assert real_token_updates({
-        "openai": "sk-real",
-        "claude": "",
-        "gemini": "   ",
-        "mistral": "********",
-        "deepseek": None,
-        "ollama": "  sk-padded  ",
-    }) == {"openai": "sk-real", "ollama": "sk-padded"}
+        "custom": "sk-real",
+        "second": "",
+        "third": "   ",
+        "fourth": "********",
+        "fifth": None,
+        "sixth": "  sk-padded  ",
+    }) == {"custom": "sk-real", "sixth": "sk-padded"}
 
     assert real_token_updates(None) == {}
     assert real_token_updates("not-a-dict") == {}
     assert real_token_updates(42) == {}
 
-
-def test_wipe_endpoint_deletes_immediately_and_reports_errors(client, mgr, tmp_path):
-    mgr.token_manager.update_tokens({"openai": "sk-stored"})
-    mgr.settings_path.write_text(
-        json.dumps(base_paths(
-            tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai")),
-        encoding="utf-8",
-    )
-    resp = client.post_json("/api/settings/wipe_token", {"provider": "openai"})
-    assert resp.status_code == 200
-    assert mgr.token_manager.get_tokens() == {}
-    body = resp.get_json()
-    assert body["errors"].get("ENV_TOKENS.openai") == {
-        "type": "i18n", "value": "err_missing_token",
-    }
-    assert body["env_tokens"] == {}

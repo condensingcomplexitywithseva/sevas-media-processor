@@ -20,6 +20,7 @@ import config_loader
 from config_loader import ConfigManager, TokenManager
 from config_validator import AI_TAB_FIELDS
 from routes.web_server import SESSION_TOKEN, create_app
+from fake_llm.harness import READY_ENTRY, ready_ai
 
 AUTH = {"X-App-Token": SESSION_TOKEN}
 AI_FIELDS = (
@@ -91,10 +92,11 @@ def test_every_dormant_field_survives_reads_and_repeated_edit_saves(isolated, fi
         assert not manager.env_path.exists()
 
 
-@pytest.mark.parametrize("provider", [
-    "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio", "custom",
-])
-def test_selected_provider_typed_view_keeps_exact_opaque_siblings(isolated, provider):
+def test_selected_provider_typed_view_keeps_exact_opaque_siblings(isolated):
+    typed_view_keeps_exact_opaque_siblings(isolated, "custom")
+
+
+def typed_view_keeps_exact_opaque_siblings(isolated, provider):
     manager, client, raw = isolated
     manager.token_manager.update_tokens({provider: "fake-token-for-validation-only"})
     raw.update(ENABLE_LLM_INFERENCE=True, LLM_PROVIDER=provider,
@@ -117,15 +119,15 @@ def test_selected_provider_typed_view_keeps_exact_opaque_siblings(isolated, prov
 @pytest.mark.parametrize("bad", [None, [], {}, "abc", 0, -1])
 def test_active_invalid_edit_refuses_all_settings_and_token_writes(isolated, bad):
     manager, client, raw = isolated
-    raw.update(ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama")
+    raw.update(ready_ai())
     write(manager, raw)
-    manager.token_manager.update_tokens({"openai": "fake-original-token"})
+    manager.token_manager.update_tokens({"custom": "fake-original-token"})
     before = manager.settings_path.read_bytes(), manager.env_path.read_bytes()
     response = client.post("/api/settings/commit", headers=AUTH, json={"edits": {
-        "JPEG_QUALITY": 81, "LLM_PROVIDERS.ollama.max_tokens": bad,
-        "ENV_TOKENS.openai": "fake-replacement-token"}})
+        "JPEG_QUALITY": 81, "LLM_PROVIDERS.custom.max_tokens": bad,
+        "ENV_TOKENS.custom": "fake-replacement-token"}})
     assert response.status_code == 400, response.get_json()
-    assert "LLM_PROVIDERS.ollama.max_tokens" in response.get_json()["errors"]
+    assert "LLM_PROVIDERS.custom.max_tokens" in response.get_json()["errors"]
     assert (manager.settings_path.read_bytes(), manager.env_path.read_bytes()) == before
 
 
@@ -169,32 +171,21 @@ def test_edit_candidate_and_validation_do_not_alias_caller_or_file(isolated):
 
 def test_explicit_leaf_repair_preserves_opaque_provider_neighbors(isolated):
     manager, client, raw = isolated
-    raw["LLM_PROVIDERS"] = {"ollama": {"model": None, "future": OPAQUE}, "claude": [False, {}]}
+    raw["LLM_PROVIDERS"] = {"custom": {"model": None, "future": OPAQUE}, "left-over-provider": [False, {}]}
     write(manager, raw)
     response = client.post("/api/settings/commit", headers=AUTH,
-                           json={"edits": {"LLM_PROVIDERS.ollama.model": "repaired"}})
+                           json={"edits": {"LLM_PROVIDERS.custom.model": "repaired"}})
     assert response.status_code == 200
-    expected = {"ollama": {"model": "repaired", "future": OPAQUE}, "claude": [False, {}]}
+    expected = {"custom": {"model": "repaired", "future": OPAQUE}, "left-over-provider": [False, {}]}
     assert exact(read(manager)["LLM_PROVIDERS"]) == exact(expected)
-
-
-@pytest.mark.parametrize("provider_shape", [{}, {"ollama": {}}, {"future": OPAQUE}])
-def test_loader_runtime_defaults_never_materialize_missing_provider_fields(isolated, provider_shape):
-    manager, _, raw = isolated
-    raw.update(ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama", LLM_PROVIDERS=provider_shape)
-    write(manager, raw)
-    for _ in range(2):
-        loaded = manager.load_strict()
-        assert loaded.ACTIVE_PROVIDER_CONFIG.url == "http://localhost:11434/v1/chat/completions"
-        manager.save_settings(loaded)
-        assert exact(read(manager)["LLM_PROVIDERS"]) == exact(provider_shape)
 
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_nested_full_draft_preserves_opaque_shapes(isolated, enabled):
     manager, client, raw = isolated
-    raw.update(ENABLE_LLM_INFERENCE=enabled, LLM_PROVIDER="ollama",
-               LLM_PROVIDERS={"ollama": {"model": "probe", "future": OPAQUE}, "future.provider": OPAQUE})
+    raw.update(ENABLE_LLM_INFERENCE=enabled, LLM_PROVIDER="custom",
+               LLM_PROVIDERS={"custom": {**READY_ENTRY, "model": "probe", "future": OPAQUE},
+                              "future.provider": OPAQUE})
     raw["future"] = raw.pop("future.key")
     write(manager, raw)
     response = client.post("/api/settings/commit", headers=AUTH, json={**raw, "JPEG_QUALITY": 81})
@@ -253,7 +244,7 @@ def test_disjoint_overlapping_control_edits_both_survive(isolated, monkeypatch, 
 def test_request_protocol_errors_preserve_their_status(isolated, mode, expected):
     manager, client, raw = isolated
     write(manager, raw)
-    manager.token_manager.update_tokens({"openai": "fake-original-probe-token"})
+    manager.token_manager.update_tokens({"custom": "fake-original-probe-token"})
     before = manager.settings_path.read_bytes(), manager.env_path.read_bytes()
     body = "{broken" if mode == "broken-json" else json.dumps(raw)
     content_type = "text/plain" if mode == "wrong-media-type" else "application/json"
@@ -289,31 +280,6 @@ def operation_headers(manager, *, base=None, identity=None):
             "X-Settings-Revision": str(manager.operations.revision if base is None else base),
         },
     )
-
-
-def test_receipt_recovery_preserves_normalized_entry_after_provider_change(isolated):
-    manager, client, raw = isolated
-    raw.update(
-        ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama", LLM_PROVIDERS={"ollama": {"max_tokens": 8, "future": OPAQUE}}
-    )
-    write(manager, raw)
-    headers = operation_headers(manager)
-    payload = {"edits": {"LLM_PROVIDERS.ollama.max_tokens": "9"}}
-    first = client.post("/api/settings/commit", headers=headers, json=payload)
-    assert first.status_code == 200
-    expected = {"max_tokens": 9, "future": OPAQUE}
-    assert exact(read(manager)["LLM_PROVIDERS"]["ollama"]) == exact(expected)
-    changed = client.post("/api/settings/commit", headers=AUTH, json={"edits": {"LLM_PROVIDER": "lm-studio"}})
-    assert changed.status_code == 200
-    before = manager.settings_path.read_bytes()
-    replay = client.post("/api/settings/commit", headers=headers, json=payload)
-    assert replay.status_code == 200
-    assert manager.settings_path.read_bytes() == before
-    assert exact(read(manager)["LLM_PROVIDERS"]["ollama"]) == exact(expected)
-    data = replay.get_json()
-    assert data["operation_revision"] == first.get_json()["operation_revision"]
-    assert data["snapshot"]["revision"] == changed.get_json()["snapshot"]["revision"]
-    assert data["snapshot"]["settings"]["LLM_PROVIDER"] == "lm-studio"
 
 
 @pytest.mark.parametrize("invalid", [False, True], ids=["saved", "rejected"])
@@ -379,10 +345,10 @@ def test_wipe_supersedes_older_token_submission_without_resurrection(isolated, d
     write(manager, raw)
     headers = operation_headers(manager)
     token = "fake-sensitive-operation-token"
-    payload = {"edits": {"ENV_TOKENS.openai": token}}
+    payload = {"edits": {"ENV_TOKENS.custom": token}}
     if not delayed_arrival:
         assert client.post("/api/settings/commit", headers=headers, json=payload).status_code == 200
-    wiped = client.post("/api/settings/wipe_token", headers=operation_headers(manager), json={"provider": "openai"})
+    wiped = client.post("/api/settings/wipe_token", headers=operation_headers(manager), json={"provider": "custom"})
     assert wiped.status_code == 200
     result = client.post("/api/settings/commit", headers=headers, json=payload)
     assert result.status_code == (409 if delayed_arrival else 200)
@@ -406,9 +372,9 @@ def test_wipe_supersedes_older_token_submission_without_resurrection(isolated, d
 def test_other_settings_operations_have_ordered_safe_receipts(isolated, operation):
     manager, client, raw = isolated
     write(manager, raw)
-    manager.token_manager.update_tokens({"openai": "fake-original"})
+    manager.token_manager.update_tokens({"custom": "fake-original"})
     headers = operation_headers(manager)
-    payload = {"provider": "openai"} if operation == "wipe_token" else {}
+    payload = {"provider": "custom"} if operation == "wipe_token" else {}
     route = "/api/settings/" + operation
     first = client.post(route, headers=headers, json=payload)
     assert first.status_code == 200
@@ -431,7 +397,7 @@ def test_partial_save_failure_is_retained_as_unknown_without_repeating_writes(is
 
     monkeypatch.setattr(api, "update_env_tokens", fail_tokens)
     headers = operation_headers(manager)
-    payload = {"edits": {"JPEG_QUALITY": 81, "ENV_TOKENS.openai": "fake-sensitive"}}
+    payload = {"edits": {"JPEG_QUALITY": 81, "ENV_TOKENS.custom": "fake-sensitive"}}
     response = client.post("/api/settings/commit", headers=headers, json=payload)
     assert response.status_code == 500 and read(manager)["JPEG_QUALITY"] == 81
 
@@ -442,14 +408,3 @@ def test_partial_save_failure_is_retained_as_unknown_without_repeating_writes(is
     replay = client.post("/api/settings/commit", headers=headers, json=payload)
     assert replay.status_code == 500 and replay.get_json()["status"] == "fatal"
     assert not manager.get_env_tokens()
-
-
-@pytest.mark.parametrize("omit_receipts", [False, True])
-def test_replay_oracle_detects_missing_receipt_retention(isolated, monkeypatch, omit_receipts):
-    if omit_receipts:
-        monkeypatch.setattr(isolated[0].operations, "remember", lambda *args: None)
-    if omit_receipts:
-        with pytest.raises(AssertionError):
-            test_receipt_recovery_preserves_normalized_entry_after_provider_change(isolated)
-    else:
-        test_receipt_recovery_preserves_normalized_entry_after_provider_change(isolated)

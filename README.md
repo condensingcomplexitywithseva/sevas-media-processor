@@ -30,7 +30,7 @@ the installer does, are in SECURITY.md.)
 
 ## Status and support
 
-Current version: v1.0.0
+Current version: v1.0.1
 
 Seva's Media Processor is free, open-source software maintained by one
 person, without paid support or a fixed release schedule. Each release
@@ -46,6 +46,12 @@ and the earlier results are kept in an archive folder.
 Questions, bugs and suggestions: open an issue on this project's GitHub
 page. Security problems: use "Report a vulnerability" on its Security tab,
 which keeps the report private.
+
+A corporate edition for managed company computers is at
+https://github.com/condensingcomplexitywithseva/sevas-media-processor-corporate.
+Its only AI provider is "custom", which you point at your organisation's
+own AI service, and its setup takes Python and the libraries only from
+your organisation's own sources.
 
 ## What file types it accepts
 
@@ -121,8 +127,7 @@ What the setup script does:
    at your own risk.
 2. Asks where the libraries should come from: the internet (pypi.org), or
    your organisation's package mirror. With a mirror, only the mirror is
-   used; if a library is missing there, the setup stops. The mirror also
-   needs `setuptools`, which pip uses to build one of the libraries.
+   used; if a library is missing there, the setup stops.
 3. Creates a "venv" (Virtual Environment) folder, so the libraries install
    into it rather than into the machine's Python. If an existing one can no
    longer start, for example because its Python was uninstalled, it is

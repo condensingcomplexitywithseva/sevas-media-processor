@@ -15,6 +15,9 @@ from sqlalchemy.exc import SQLAlchemyError
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+TESTS = Path(__file__).resolve().parent
+if str(TESTS) not in sys.path:
+    sys.path.insert(0, str(TESTS))
 
 from batch_orchestrator import BatchOrchestrator
 from db_controller import SQLiteDatabaseController
@@ -1223,13 +1226,11 @@ IDENTITY_URL = "http://127.0.0.1:9/v1/chat/completions"
 
 
 def _acceptance_settings(folder, base_url, mode, **overrides):
-    from urllib.parse import urlparse
-    from config_validator import Settings, _default_provider_configs
-    path = urlparse(_default_provider_configs()["openai"].url).path
+    from config_validator import Settings
+    from fake_llm.harness import format_settings
     values: dict[str, Any] = {
         "INPUT_FOLDER_PATH": str(Path(folder) / "input"), "OUTPUT_FOLDER_PATH": str(Path(folder) / "output"),
-        "ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai",
-        "LLM_PROVIDERS": {"openai": {"url": base_url.rstrip("/") + path}},
+        **format_settings("openai", base_url),
         "LLM_MAX_RETRIES": 1, "LLM_RETRY_SLEEP_SECONDS": 0, "LLM_TIMEOUT_SECONDS": 30,
         "HALT_ON_LLM_PARSE_ERROR": False, "LLM_JSON_MAX_ATTEMPTS": 1, "MAX_JPEGS_PER_INFERENCE": 2,
         "LLM_OUTPUT_MODE": mode, "LLM_OUTPUT_COLUMNS": "answer", "LLM_USER_PROMPT": ACCEPTANCE_PROMPT,
@@ -1287,8 +1288,10 @@ def _real_core_child(folder, base_url, mode, token):
     from app_context import ProcessorCore
     for key in [key for key in os.environ if key.endswith("_TOKEN")]:
         del os.environ[key]
+    from fake_llm.harness import TEST_PROVIDER
+    from config_validator import token_env_key
     central_logger.setup_logging = lambda *args, **kwargs: None
-    llm_client.get_env_tokens = lambda: {"OPENAI_TOKEN": token}
+    llm_client.get_env_tokens = lambda: {token_env_key(TEST_PROVIDER): token}
     events: list[Any] = []
     ProcessorCore(_acceptance_settings(folder, base_url, mode), threading.Event(), on_progress=events.append).run()
     (Path(folder) / "events.json").write_text(json.dumps(events, default=str), encoding="utf-8")
@@ -1423,8 +1426,10 @@ def isolated_core(monkeypatch):
     from fake_llm.harness import KEY_SHAPED_TOKENS
     for key in [key for key in os.environ if key.endswith("_TOKEN")]:
         monkeypatch.delenv(key)
+    from fake_llm.harness import format_tokens
     monkeypatch.setattr(central_logger, "setup_logging", lambda *args, **kwargs: None)
-    tokens = {"OPENAI_TOKEN": KEY_SHAPED_TOKENS["openai"]}
+    tokens = format_tokens("openai")
+    assert list(tokens.values()) == [KEY_SHAPED_TOKENS["openai"]]
     monkeypatch.setattr(llm_client, "get_env_tokens", lambda: dict(tokens))
     return tokens
 
@@ -1463,8 +1468,8 @@ def test_authentication_halt_exports_diagnostics_and_retry_restarts_only_the_hal
         assert all(INCOMPLETE_NOTE in row[column["notes"]] for row in table[2:])
         assert "Request failed" in table[3][column["notes"]]
 
-        isolated_core["OPENAI_TOKEN"] = isolated_core["OPENAI_TOKEN"][:-1] + (
-            "A" if isolated_core["OPENAI_TOKEN"][-1] != "A" else "B")
+        (key, token), = isolated_core.items()
+        isolated_core[key] = token[:-1] + ("A" if token[-1] != "A" else "B")
         repaired = _acceptance_settings(tmp_path, server.base_url, "table_per_file", LLM_TIMEOUT_SECONDS=45,
                                         INPUT_FOLDER_PATH=str(tmp_path / "input").replace("\\", "/") + "/")
         events = []
@@ -1488,6 +1493,7 @@ def test_authentication_halt_exports_diagnostics_and_retry_restarts_only_the_hal
 
 
 IDENTITY_TOKEN = "identity-token-a"
+IDENTITY_ENTRY = {"url": IDENTITY_URL, "model": "identity-model"}
 
 
 def _identity(tmp_path, token=IDENTITY_TOKEN, **overrides):
@@ -1498,16 +1504,16 @@ def _identity(tmp_path, token=IDENTITY_TOKEN, **overrides):
         (tmp_path / name).mkdir(exist_ok=True)
     values: dict[str, Any] = {
         "INPUT_FOLDER_PATH": str(tmp_path / "input"), "OUTPUT_FOLDER_PATH": str(tmp_path / "output"),
-        "ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai", "LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL}},
+        "ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "custom", "LLM_PROVIDERS": {"custom": IDENTITY_ENTRY},
     }
     values.update(overrides)
     settings = Settings(**values)
     return processing_identity(settings, LLMClient(settings, token=token) if settings.ENABLE_LLM_INFERENCE else None)
 
 
-def _openai_preset():
+def _custom_preset():
     from config_validator import _default_provider_configs
-    return _default_provider_configs()["openai"]
+    return _default_provider_configs()["custom"]
 
 
 ALLOWED_IDENTITY_EDITS = {
@@ -1522,14 +1528,15 @@ ALLOWED_IDENTITY_EDITS = {
     "parse halt": {"HALT_ON_LLM_PARSE_ERROR": False},
     "malformed halt": {"LLM_ABORT_ON_MALFORMED_JSON": True},
     "breaker threshold": {"MAX_CONSECUTIVE_LLM_FAILURES": 2},
-    "inactive provider": {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL}, "claude": {"model": "other-model"}}},
-    "explicit preset model": {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL, "model": _openai_preset().model}}},
+    "inactive provider": {"LLM_PROVIDERS": {"custom": IDENTITY_ENTRY, "inactive-entry": {"model": "other-model"}}},
+    "explicit preset value": {"LLM_PROVIDERS": {"custom": {
+        **IDENTITY_ENTRY, "reasoning_handling": _custom_preset().reasoning_handling}}},
     "inactive video mode": {"VIDEO_SAMPLING_CAPTURE_RATE_FPS": 3.0, "VIDEO_SAMPLING_MAX_FRAMES_BUDGET": 7},
     "column spacing": {"LLM_OUTPUT_COLUMNS": " answer "},
     "range spacing": {"DOCUMENT_RANGE": " 1 - 3 ", "_base": {"DOCUMENT_RANGE": "1-3"}},
 }
-if not _openai_preset().require_max_tokens:
-    ALLOWED_IDENTITY_EDITS["dormant token limit"] = {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL,
+if not _custom_preset().require_max_tokens:
+    ALLOWED_IDENTITY_EDITS["dormant token limit"] = {"LLM_PROVIDERS": {"custom": {**IDENTITY_ENTRY,
                                                                                "max_tokens": 1234}}}
 
 
@@ -1542,9 +1549,9 @@ def test_run_identity_accepts_credential_operational_dormant_and_equivalent_edit
 
 
 REFUSED_IDENTITY_EDITS = {
-    "endpoint": {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL.replace(":9/", ":10/")}}},
-    "model": {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL, "model": "another-model"}}},
-    "active extra header": {"LLM_PROVIDERS": {"openai": {"url": IDENTITY_URL, "extra_header_key": "API-Version",
+    "endpoint": {"LLM_PROVIDERS": {"custom": {**IDENTITY_ENTRY, "url": IDENTITY_URL.replace(":9/", ":10/")}}},
+    "model": {"LLM_PROVIDERS": {"custom": {**IDENTITY_ENTRY, "model": "another-model"}}},
+    "active extra header": {"LLM_PROVIDERS": {"custom": {**IDENTITY_ENTRY, "extra_header_key": "API-Version",
                                                          "extra_header_value": "2"}}},
     "user prompt": {"LLM_USER_PROMPT": "another task"},
     "system prompt": {"LLM_SYSTEM_PROMPT": "another role"},
@@ -1578,7 +1585,7 @@ TOKEN_LIMIT_EDITS = {
 @pytest.mark.parametrize("before,after", list(TOKEN_LIMIT_EDITS.values()), ids=list(TOKEN_LIMIT_EDITS))
 def test_token_limit_edits_are_repairs_that_keep_the_run_identity(tmp_path, before, after):
     def identity(fields):
-        return _identity(tmp_path, LLM_PROVIDERS={"openai": {"url": IDENTITY_URL, **fields}})
+        return _identity(tmp_path, LLM_PROVIDERS={"custom": {**IDENTITY_ENTRY, **fields}})
     assert identity(after) == identity(before)
 
 
@@ -1594,10 +1601,12 @@ def test_raising_the_token_limit_after_a_truncation_halt_resends_only_the_halted
     model.after_call[1] = lambda: server.queue(json=openai_reply('{"answer": "cut o', finish_reason="length"))
     try:
         def settings(limit):
+            from fake_llm.harness import format_settings
+            providers = format_settings("openai", server.base_url, require_max_tokens=True,
+                                        max_tokens=limit)["LLM_PROVIDERS"]
             return _acceptance_settings(
                 tmp_path, server.base_url, "table_per_file", HALT_ON_LLM_PARSE_ERROR=True,
-                LLM_PROVIDERS={"openai": {"url": server.base_url.rstrip("/") + "/v1/chat/completions",
-                                          "require_max_tokens": True, "max_tokens": limit}})
+                LLM_PROVIDERS=providers)
         events: list[Any] = []
         core = ProcessorCore(settings(1000), threading.Event(), on_progress=events.append)
         core.run()
@@ -1677,7 +1686,7 @@ def test_dormant_ai_settings_never_change_an_ai_off_identity(tmp_path):
     off = _identity(tmp_path, ENABLE_LLM_INFERENCE=False)
     assert _identity(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_USER_PROMPT="another task",
                      LLM_OUTPUT_COLUMNS="answer,colour", MAX_JPEGS_PER_INFERENCE=5,
-                     LLM_PROVIDERS={"openai": {"url": IDENTITY_URL, "model": "another-model"}}) == off
+                     LLM_PROVIDERS={"custom": {**IDENTITY_ENTRY, "model": "another-model"}}) == off
     assert _identity(tmp_path, ENABLE_LLM_INFERENCE=False, JPEG_QUALITY=80) != off
 
 

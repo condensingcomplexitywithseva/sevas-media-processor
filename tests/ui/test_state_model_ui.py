@@ -3,6 +3,8 @@
 
 import json
 
+from fake_llm.harness import ready_ai
+
 
 def test_retyping_the_same_value_is_not_dirty(open_page):
     page = open_page({})
@@ -58,8 +60,7 @@ def test_unparseable_number_survives_apply_and_shows_error(open_page):
 
 def test_checkbox_group_and_dual_prompt_discard_roundtrip(open_page):
     disk_prompt = "the prompt that is on disk"
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama",
-                      "LLM_USER_PROMPT": disk_prompt})
+    page = open_page({**ready_ai(), "LLM_USER_PROMPT": disk_prompt})
 
     page.evaluate("window.switchTab('general')")
     page.wait_for_timeout(400)
@@ -169,7 +170,7 @@ def test_apply_normalizes_spelling_on_disk(open_page, tmp_path):
     assert state["dirty_count"] == 0
 
 
-MODEL = '[name="LLM_PROVIDERS.lm-studio.model"]'
+MODEL = '[name="LLM_PROVIDERS.custom.model"]'
 
 
 def _model_state(page, tmp_path):
@@ -180,7 +181,7 @@ def _model_state(page, tmp_path):
         apply_disabled: document.getElementById('btn-apply').disabled,
         start_disabled: document.getElementById('btn-start').disabled,
     })""", MODEL)
-    state["saved"] = saved["LLM_PROVIDERS"]["lm-studio"]["model"]
+    state["saved"] = saved["LLM_PROVIDERS"]["custom"]["model"]
     return state
 
 
@@ -192,8 +193,7 @@ def _apply(page):
 
 
 def test_a_space_typed_or_removed_in_a_text_field_is_an_edit(open_page, tmp_path):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "lm-studio",
-                      "LLM_PROVIDERS": {"lm-studio": {"model": "provider/model"}}})
+    page = open_page(ready_ai(model="provider/model"))
     page.click('[data-tab="ai"]')
     page.wait_for_timeout(400)
 
@@ -206,8 +206,7 @@ def test_a_space_typed_or_removed_in_a_text_field_is_an_edit(open_page, tmp_path
 
 
 def test_a_padded_saved_value_can_be_repaired(open_page, tmp_path):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "lm-studio",
-                      "LLM_PROVIDERS": {"lm-studio": {"model": "other/model "}}})
+    page = open_page(ready_ai(model="other/model "))
     page.click('[data-tab="ai"]')
     page.wait_for_timeout(400)
     assert _model_state(page, tmp_path)["shown"] == "other/model "

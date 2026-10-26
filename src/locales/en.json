@@ -122,9 +122,9 @@
     "hint_llm_sleep": "Pause duration in seconds between consecutive network retries.\nMust be >= 0.",
 
     "lbl_prov_url": "AI URL:",
-    "hint_prov_url": "The official API endpoint address for {provider}. For local providers (like LM Studio or Ollama), this is usually a localhost address (e.g., http://localhost:1234/v1/chat/completions).",
+    "hint_prov_url": "The full address the requests are sent to, for example 'https://ai.example.com/v1/chat/completions'. For an AI running on this computer, use a localhost address.",
     "lbl_prov_model": "AI Model Name:",
-    "hint_prov_model": "The exact identifier for the {provider} model you wish to use (e.g., 'gpt-5.6' or 'claude-sonnet-5'). Ensure this matches the provider's official model list perfectly to avoid routing errors.",
+    "hint_prov_model": "The model's exact name, as the AI service lists it, for example 'model-name' or 'provider/model-name'. The service refuses a misspelled name.",
     "hint_local_context": "Local servers start with a small context window (Ollama and LM Studio: 4096 tokens), and one image costs about 2,500 tokens. Raise the context length in the server itself (Ollama: OLLAMA_CONTEXT_LENGTH; LM Studio: the model's load settings) or set {images} to 1. These details change between versions: search online for the current way to set it.",
     "lbl_prov_token": "API Token:",
     "hint_prov_token": "Enter a token and apply the change to save it on this computer.",
@@ -139,7 +139,7 @@
     "lbl_req_max": "Require Max Tokens:",
     "hint_req_max": "Check this box to send the reply-length ceiling below with every request. OpenAI treats it as optional; Anthropic Claude rejects a request without it.",
     "lbl_max_tokens_field": "Max Tokens Field Name:",
-    "hint_max_tokens_field": "The request field that carries the ceiling. OpenAI's gpt-5 family rejects 'max_tokens' and wants 'max_completion_tokens'; the other presets use 'max_tokens'. Sent only when {setting} is ticked.",
+    "hint_max_tokens_field": "The request field that carries the ceiling: 'max_tokens' for most services; some want 'max_completion_tokens'. Sent only when {setting} is ticked.",
     "err_max_tokens_field_invalid": "Enter the field name without spaces, e.g. 'max_tokens'.",
     "lbl_max_val": "Max Tokens Value:",
     "hint_max_val": "Active only when {setting} is enabled.\nThe ceiling on the reply length in tokens (pieces of words), the model's thinking included. Too low cuts the answer off and the run halts with a token-limit error; raise it if that happens.",
@@ -150,7 +150,7 @@
     "lbl_extract_path": "Response Extract Path:",
     "hint_extract_path": "The exact JSON bracket path to locate the AI's text response.\n• OpenAI/Custom: 'choices[0].message.content'\n• Anthropic Claude: 'content[0].text'",
     "lbl_reasoning": "Reasoning Handling:",
-    "hint_reasoning": "Determines how AI reasoning is handled:\n• preserve: Keeps all text intact.\n• strip_xml: Removes <think> tags (Ollama/Local).\n• parse_claude_blocks: Filters Anthropic 'thinking' arrays.\n• ignore_api_field: Ignores DeepSeek's dedicated reasoning fields.",
+    "hint_reasoning": "Determines how AI reasoning is handled:\n• preserve: Keeps all text intact.\n• strip_xml: Removes <think> tags (local models).\n• parse_claude_blocks: Filters Anthropic 'thinking' arrays.\n• ignore_api_field: Ignores DeepSeek's dedicated reasoning fields.",
 
     "lbl_exp_title": "Retrieve Data and Logs",
 

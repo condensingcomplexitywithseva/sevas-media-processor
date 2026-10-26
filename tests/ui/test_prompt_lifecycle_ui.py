@@ -3,7 +3,6 @@
 
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 from PIL import Image
 
@@ -12,7 +11,7 @@ if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
 from fake_llm import make_server
-from fake_llm.harness import KEY_SHAPED_TOKENS
+from fake_llm.harness import KEY_SHAPED_TOKENS, format_settings, ready_ai
 
 GARBAGE = "never a prompt".encode("utf-16-le")
 RECOVERY_PROMPT = "Begin with the exact text UI-RECOVERY-TAG then transcribe."
@@ -30,7 +29,7 @@ def start_button(page):
 def test_apply_with_garbage_prompt_draft_is_refused_loudly(open_page, tmp_path):
     bad = tmp_path / "bad_prompt.txt"
     bad.write_bytes(GARBAGE)
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"})
+    page = open_page(ready_ai())
     settings_file = tmp_path / "settings.json"
     before = settings_file.read_bytes()
 
@@ -65,27 +64,18 @@ def test_apply_with_garbage_prompt_draft_is_refused_loudly(open_page, tmp_path):
 
 
 def test_garbage_on_disk_fails_loud_then_recovery_run_succeeds(open_page, tmp_path):
-    from config_validator import _default_provider_configs
-
     bad = tmp_path / "bad_prompt.txt"
     bad.write_bytes(GARBAGE)
 
     srv = make_server("gemini").start()
     try:
-        preset = _default_provider_configs()["gemini"]
-        entry = preset.model_copy(
-            update={"url": srv.base_url.rstrip("/") + urlparse(preset.url).path}
-        ).model_dump(mode="json")
-
         page = open_page(
             {
-                "ENABLE_LLM_INFERENCE": True,
-                "LLM_PROVIDER": "gemini",
-                "LLM_PROVIDERS": {"gemini": entry},
+                **format_settings("gemini", srv.base_url),
                 "LLM_USER_PROMPT_MODE": "FILE",
                 "LLM_USER_PROMPT": str(bad),
             },
-            tokens={"gemini": KEY_SHAPED_TOKENS["gemini"]},
+            tokens={"custom": KEY_SHAPED_TOKENS["gemini"]},
         )
         Image.new("RGB", (320, 200), (60, 120, 200)).save(
             tmp_path / "input" / "probe.png"

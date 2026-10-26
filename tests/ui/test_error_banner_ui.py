@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
-AI_TOKEN_ERROR = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai"}
+AI_ONE_ERROR = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "custom",
+                "LLM_PROVIDERS": {"custom": {"model": "a-model"}}}
 
 
 def read_banner(page):
@@ -34,7 +35,7 @@ def read_banner(page):
 
 
 def test_banner_layout_with_ai_only_errors(open_page):
-    page = open_page(AI_TOKEN_ERROR)
+    page = open_page(AI_ONE_ERROR)
     state = read_banner(page)
     assert state["banner_visible"]
     assert state["banner_is_column"] == "column"
@@ -52,7 +53,7 @@ def test_banner_layout_with_ai_only_errors(open_page):
 
 
 def test_goto_setting_navigates_without_touching_value(open_page):
-    page = open_page(AI_TOKEN_ERROR)
+    page = open_page(AI_ONE_ERROR)
     value_before = page.evaluate("document.getElementById('ENABLE_LLM_INFERENCE').value")
     page.click("#global-error-ai-hint a")
     page.wait_for_timeout(400)
@@ -75,7 +76,7 @@ def test_goto_setting_navigates_without_touching_value(open_page):
 
 
 def test_jump_button_lands_on_ai_tab_error(open_page):
-    page = open_page(AI_TOKEN_ERROR)
+    page = open_page(AI_ONE_ERROR)
     page.click("#global-error-text .banner-jump-btn")
     page.wait_for_timeout(400)
     state = page.evaluate(
@@ -95,7 +96,7 @@ def test_jump_button_lands_on_ai_tab_error(open_page):
     )
     assert state["active_tab"] == "ai", "with AI-only errors the jump must land on the AI tab"
     assert state["flashed_is_group"], "the pulse must land on the form-group wrapper"
-    assert state["flashed_field"] == "ENV_TOKENS.openai"
+    assert state["flashed_field"] == "LLM_PROVIDERS.custom.url"
 
 
 def test_ai_hint_impossible_when_mode_is_jpeg(open_page):
@@ -115,7 +116,7 @@ def test_no_banner_when_config_valid(open_page):
 
 
 def test_banner_strings_render_in_russian(open_page):
-    page = open_page(AI_TOKEN_ERROR)
+    page = open_page(AI_ONE_ERROR)
     page.evaluate("changeLanguage('ru')")
     page.wait_for_timeout(300)
     state = read_banner(page)

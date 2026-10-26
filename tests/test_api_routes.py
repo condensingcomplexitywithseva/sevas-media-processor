@@ -669,7 +669,7 @@ def test_clear_logs_never_deletes_the_active_session_log(api, tmp_path, monkeypa
 
 def test_rendered_page_never_contains_a_real_token(api):
     app = api()
-    api.mgr.token_manager.update_tokens({"openai": "super-secret-token-not-for-html"})
+    api.mgr.token_manager.update_tokens({"custom": "super-secret-token-not-for-html"})
 
     page = app.test_client().get("/").get_data(as_text=True)
 
@@ -722,13 +722,13 @@ def test_commit_still_works_on_a_readable_file(api, tmp_path):
 @pytest.mark.parametrize("ai_enabled", [True, False])
 def test_apply_saves_single_line_settings_without_surrounding_spaces(api, tmp_path, ai_enabled):
     dormant = {"model": "gpt-5.6 "}
-    client = api(ENABLE_LLM_INFERENCE=ai_enabled, LLM_PROVIDER="lm-studio",
-                 LLM_PROVIDERS={"openai": dormant}).test_client()
+    client = api(ENABLE_LLM_INFERENCE=ai_enabled, LLM_PROVIDER="custom",
+                 LLM_PROVIDERS={"left-over-provider": dormant}).test_client()
     edits = {
-        "LLM_PROVIDERS.lm-studio.model": "provider/model ",
-        "LLM_PROVIDERS.lm-studio.url": " http://localhost:1234/v1/chat/completions ",
-        "LLM_PROVIDERS.lm-studio.extra_header_key": " x-key ",
-        "LLM_PROVIDERS.lm-studio.response_extraction_path": "choices[0].message.content\t",
+        "LLM_PROVIDERS.custom.model": "provider/model ",
+        "LLM_PROVIDERS.custom.url": " http://localhost:1234/v1/chat/completions ",
+        "LLM_PROVIDERS.custom.extra_header_key": " x-key ",
+        "LLM_PROVIDERS.custom.response_extraction_path": "choices[0].message.content\t",
         "INPUT_FOLDER_PATH": f" {tmp_path / 'input'} ",
         "OUTPUT_FOLDER_PATH": f"{tmp_path / 'output'} ",
     }
@@ -738,8 +738,8 @@ def test_apply_saves_single_line_settings_without_surrounding_spaces(api, tmp_pa
     on_disk = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert on_disk["INPUT_FOLDER_PATH"] == str(tmp_path / "input")
     assert on_disk["OUTPUT_FOLDER_PATH"] == str(tmp_path / "output")
-    assert on_disk["LLM_PROVIDERS"]["openai"] == dormant
-    saved = on_disk["LLM_PROVIDERS"]["lm-studio"]
+    assert on_disk["LLM_PROVIDERS"]["left-over-provider"] == dormant
+    saved = on_disk["LLM_PROVIDERS"]["custom"]
     sent = {name.rsplit(".", 1)[1]: value for name, value in edits.items() if "." in name}
     expected = {field: value.strip() if ai_enabled else value for field, value in sent.items()}
     assert {field: saved[field] for field in sent} == expected

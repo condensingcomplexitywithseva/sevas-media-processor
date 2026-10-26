@@ -13,10 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 README = REPO_ROOT / "README.md"
 REQUIREMENTS = REPO_ROOT / "requirements.txt"
 INSTALL_SCRIPT = REPO_ROOT / "install.txt"
-VERSION_SOURCE = REPO_ROOT / "src" / "version.py"
 
-README_APP_VERSION = re.compile(r"^Current version: (v\d+(?:\.\d+)+)\s*$", re.M)
-APP_VERSION_LINE = re.compile(r'^APP_VERSION\s*=\s*"(\d+(?:\.\d+)+)"', re.M)
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+from version import APP_VERSION_LABEL
+
+README_APP_VERSION = re.compile(r"^Current version: (v\d+(?:\.\d+)+(?: \S.*?)?)\s*$", re.M)
 SETUP_HEADING = "## Initial setup instructions"
 UPDATING_HEADING = "## Updating to a new version"
 VERSION_LABEL = '"Current version"'
@@ -120,12 +122,10 @@ def test_readme_states_the_app_version_the_window_shows():
         f"README.md must carry exactly one 'Current version: vX.Y.Z' line, "
         f"found {len(readme_hits)}"
     )
-    source_hit = APP_VERSION_LINE.search(VERSION_SOURCE.read_text(encoding="utf-8"))
-    assert source_hit, "src/version.py no longer declares APP_VERSION"
-    assert readme_hits[0] == f"v{source_hit.group(1)}", (
-        f"README.md says 'Current version: {readme_hits[0]}' but "
-        f"src/version.py has APP_VERSION {source_hit.group(1)}. The README "
-        "follows the code: update the line with every version bump."
+    assert readme_hits[0] == APP_VERSION_LABEL, (
+        f"README.md says 'Current version: {readme_hits[0]}' but the window "
+        f"shows {APP_VERSION_LABEL} (src/version.py). The README follows the "
+        "code: update the line with every version bump."
     )
 
 
@@ -161,10 +161,6 @@ def test_readme_and_install_script_agree_on_the_python_version():
         f"install.txt accepts Python {named}, and README.md never says "
         f"'Python {named}'. The two must name the same versions - a reader "
         "installs from the README and the script enforces the gate."
-    )
-    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
-    assert 'winget install --id "Python.Python.3.$AutoInstallMinor" ' in script, (
-        "install.txt's winget command no longer installs Python.Python.3.$AutoInstallMinor"
     )
 
 

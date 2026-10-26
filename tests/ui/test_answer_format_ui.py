@@ -6,11 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from fake_llm.harness import ready_ai
+
 LANGUAGES = sorted(
     path.stem for path in (Path(__file__).resolve().parents[2] / "src/locales").glob("*.json")
 )
 
-AI_ON_LOCAL = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"}
+AI_ON_LOCAL = ready_ai()
 
 NEW_AI_FIELDS = ("LLM_OUTPUT_MODE", "LLM_OUTPUT_COLUMNS",
                  "LLM_OUTPUT_COLUMN_INSTRUCTIONS", "LLM_JSON_MAX_ATTEMPTS",
@@ -143,8 +145,8 @@ def test_retired_export_toggle_is_absent_and_an_output_edit_still_saves(
     open_page, tmp_path, language, ai_enabled,
 ):
     page = open_page({
+        **ready_ai(),
         "ENABLE_LLM_INFERENCE": ai_enabled,
-        "LLM_PROVIDER": "ollama",
         "EXPORT_JOINED_SHEET": {"obsolete": "invalid"},
         "FUTURE_OUTPUT_OPTION": {"keep": [1, False]},
     })

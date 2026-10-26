@@ -14,7 +14,8 @@ import requests  # noqa: F401
 from PIL import Image
 
 from fake_llm import available
-from fake_llm.harness import wire_provider, KEY_SHAPED_TOKENS  # noqa: F401
+from fake_llm.harness import REQUEST_FORMATS, TEST_PROVIDER, format_settings
+from fake_llm.harness import wire_provider  # noqa: F401
 
 from schemas import ConfigurationError
 
@@ -26,31 +27,35 @@ def jpeg(tmp_path):
     return p
 
 
-@pytest.mark.parametrize("provider", available())
-def test_real_client_round_trips_against_each_provider(wire_provider, jpeg, provider):
-    srv, client = wire_provider(provider)
+def test_every_simulator_has_a_request_format():
+    assert sorted(REQUEST_FORMATS) == sorted(available())
+
+
+@pytest.mark.parametrize("request_format", available())
+def test_real_client_round_trips_in_each_request_format(wire_provider, jpeg, request_format):
+    srv, client = wire_provider(request_format)
 
     outcomes = client.execute_network_inference([(1, jpeg, "")])
 
     assert [o.status for o in outcomes] == ["ok"], \
-        f"{provider}: {[o.error for o in outcomes]}"
+        f"{request_format}: {[o.error for o in outcomes]}"
     assert "quick brown fox" in outcomes[0].raw_answer.lower()
-    assert srv.requests, f"{provider}: no request reached the server"
+    assert srv.requests, f"{request_format}: no request reached the server"
 
 
-@pytest.mark.parametrize("provider", ["openai", "claude", "deepseek"])
+@pytest.mark.parametrize("request_format", ["openai", "claude", "deepseek"])
 def test_wrong_shaped_token_is_rejected_like_the_real_server(
-    wire_provider, jpeg, provider
+    wire_provider, jpeg, request_format
 ):
-    srv, client = wire_provider(provider, token="not-a-real-key")
+    srv, client = wire_provider(request_format, token="not-a-real-key")
 
     with pytest.raises(ConfigurationError, match="FATAL AUTHENTICATION ERROR"):
         client.execute_network_inference([(1, jpeg, "")])
-    assert srv.requests, f"{provider}: the rejection never came from the server"
+    assert srv.requests, f"{request_format}: the rejection never came from the server"
 
 
 
-def test_openai_preset_with_the_ceiling_ticked_is_accepted(wire_provider, jpeg):
+def test_the_openai_format_with_the_ceiling_ticked_is_accepted(wire_provider, jpeg):
     srv, client = wire_provider("openai",
                                 provider_overrides={"require_max_tokens": True})
 
@@ -95,24 +100,35 @@ def test_gemini_wrong_shaped_key_must_halt_as_a_credentials_error(
     assert srv.requests, "gemini: the rejection never came from the server"
 
 
-def test_padded_stored_model_and_url_still_reach_the_model(jpeg, tmp_path):
-    from urllib.parse import urlparse
+def test_the_custom_preset_round_trips_once_an_address_and_model_are_typed(jpeg):
+    from fake_llm import make_server
+    from fake_llm.harness import KEY_SHAPED_TOKENS, build_preset_client
 
-    from config_validator import Settings, _default_provider_configs
+    srv = make_server("openai").start()
+    try:
+        client = build_preset_client(
+            "custom", srv.base_url, token=KEY_SHAPED_TOKENS["openai"],
+            provider_overrides={"url": srv.base_url + "/v1/chat/completions", "model": "gpt-5.6"})
+        outcomes = client.execute_network_inference([(1, jpeg, "")])
+        assert [o.status for o in outcomes] == ["ok"], [o.error for o in outcomes]
+    finally:
+        srv.stop()
+
+
+def test_padded_stored_model_and_url_still_reach_the_model(jpeg, tmp_path):
+    from config_validator import Settings
     from fake_llm import make_server
     from llm_client import LLMClient
 
-    preset = _default_provider_configs()["lm-studio"]
     srv = make_server("lm-studio").start()
     try:
-        settings = Settings(
-            ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="lm-studio", LLM_MAX_RETRIES=1,
-            LLM_PROVIDERS={"lm-studio": {
-                "url": f" {srv.base_url.rstrip('/')}{urlparse(preset.url).path} ",
-                "model": f"{preset.model} ",
-            }})
+        values = format_settings("lm-studio", srv.base_url)
+        entry = values["LLM_PROVIDERS"][TEST_PROVIDER]
+        model = entry["model"]
+        entry.update(url=f" {entry['url']} ", model=f"{model} ")
+        settings = Settings(LLM_MAX_RETRIES=1, **values)
         outcomes = LLMClient(settings).execute_network_inference([(1, jpeg, "")])
         assert [o.status for o in outcomes] == ["ok"], [o.error for o in outcomes]
-        assert srv.requests[-1].json["model"] == preset.model
+        assert srv.requests[-1].json["model"] == model
     finally:
         srv.stop()

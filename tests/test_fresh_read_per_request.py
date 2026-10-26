@@ -94,17 +94,17 @@ def test_validation_state_is_recomputed_on_every_page_request(app, tmp_path):
 
 def test_a_json_api_request_sees_the_new_disk_state_too(app, tmp_path):
     client = app.test_client()
-    wipe = {"provider": "openai"}
+    wipe = {"provider": "custom"}
 
-    write_settings(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDER="openai")
+    write_settings(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDER="custom")
     quiet = client.post("/api/settings/wipe_token", json=wipe, headers=AUTH)
     assert quiet.status_code == 200
     assert quiet.get_json()["errors"] == {}, quiet.get_json()
 
-    write_settings(tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai")
+    write_settings(tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="custom")
 
     loud = client.post("/api/settings/wipe_token", json=wipe, headers=AUTH)
     assert loud.status_code == 200
-    assert loud.get_json()["errors"].get("ENV_TOKENS.openai") == {
-        "type": "i18n", "value": "err_missing_token",
+    assert loud.get_json()["errors"].get("LLM_PROVIDERS.custom.url") == {
+        "type": "i18n", "value": "err_missing_url",
     }, "the endpoint answered from a remembered read of settings.json"

@@ -20,15 +20,14 @@ from range_parsers import PageRangeSelector
 
 from fake_llm import make_server
 from fake_llm.generic import GenericServer, openai_reply
-from fake_llm.harness import build_client, wire_provider  # noqa: F401 (fixture)
+from fake_llm.harness import REQUEST_FORMATS, build_client
+from fake_llm.harness import wire_provider  # noqa: F401 (fixture)
 
 from test_results_report import (
     add_file, export_results_csv, new_name, read_csv_rows,
     request_outcome, sql, store_requests,
 )
 
-STRICT_PRESETS = ["openai", "claude", "gemini", "deepseek", "mistral",
-                  "zai", "ollama", "lm-studio"]
 LABEL = "Image %d of %d - page %d."
 
 
@@ -183,7 +182,7 @@ def test_a_skipped_image_is_absent_from_the_recorded_pages(tmp_path):
     assert label_pages(server.requests[0]) == [1, 3]
 
 
-@pytest.mark.parametrize("provider", STRICT_PRESETS)
+@pytest.mark.parametrize("provider", REQUEST_FORMATS)
 def test_recorded_pages_equal_the_labels_on_the_wire(wire_provider, tmp_path, provider):  # noqa: F811 (fixture)
     srv, client = wire_provider(provider, MAX_JPEGS_PER_INFERENCE=2)
     outcomes = client.execute_network_inference(frames(jpegs(tmp_path, 5)))

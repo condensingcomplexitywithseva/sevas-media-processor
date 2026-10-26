@@ -4,6 +4,8 @@
 
 import json
 
+import pytest
+
 CLAUDE_MAX_TOKENS = 'input[name="LLM_PROVIDERS.claude.max_tokens"]'
 
 FAKE_TOKENS = {
@@ -28,6 +30,19 @@ def frame_ids(page):
     return set(page.eval_on_selector_all('.provider-frame', 'frames => frames.map(f => f.id)'))
 
 
+@pytest.mark.parametrize("providers", [None, [], "dormant", {"claude": None},
+                                      {"newprovider": {"url": "http://localhost", "model": "future"}}])
+def test_every_preset_gets_a_frame_whatever_is_stored(open_page, providers):
+    page = open_page({"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDERS": providers})
+    assert frame_ids(page) == SUPPORTED_FRAMES
+
+
+def test_an_unknown_selected_provider_still_shows_every_preset_frame(open_page):
+    page = open_page({"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDER": "future-provider",
+                      "LLM_PROVIDERS": {"future-provider": {"model": "x"}}})
+    assert frame_ids(page) == SUPPORTED_FRAMES
+
+
 def open_ai_tab(page):
     page.click('[data-tab="ai"]')
     page.wait_for_timeout(400)
@@ -47,47 +62,6 @@ def banner_and_errors(page):
             apply_disabled: document.getElementById('btn-apply').disabled,
         })"""
     )
-
-
-def test_disk_garbage_in_non_selected_provider_shows_no_error(open_page):
-    page = open_page(
-        {
-            "ENABLE_LLM_INFERENCE": True,
-            "LLM_PROVIDER": "openai",
-            "LLM_PROVIDERS": {"claude": {"max_tokens": "abc"}},
-        },
-        tokens=FAKE_TOKENS,
-    )
-    state = page.evaluate(
-        """() => ({
-            banner_visible: getComputedStyle(document.getElementById('global-error-banner')).display !== 'none',
-            disk_errors: Object.keys(window.diskErrors || {}),
-            start_disabled: document.getElementById('btn-start').disabled,
-        })"""
-    )
-    assert not state["banner_visible"], "no banner for a non-selected provider's value"
-    assert state["disk_errors"] == []
-    assert not state["start_disabled"], "Start must not be blocked"
-
-
-def test_ai_off_means_no_ai_errors_even_for_selected_provider(open_page):
-    page = open_page(
-        {
-            "ENABLE_LLM_INFERENCE": False,
-            "LLM_PROVIDER": "claude",
-            "LLM_PROVIDERS": {"claude": {"max_tokens": "abc"}},
-        }
-    )
-    state = page.evaluate(
-        """() => ({
-            banner_visible: getComputedStyle(document.getElementById('global-error-banner')).display !== 'none',
-            disk_errors: Object.keys(window.diskErrors || {}),
-            start_disabled: document.getElementById('btn-start').disabled,
-        })"""
-    )
-    assert not state["banner_visible"], "AI is off — nothing AI-related may block"
-    assert state["disk_errors"] == []
-    assert not state["start_disabled"]
 
 
 def test_garbage_in_selected_provider_still_shows_visible_error(open_page):
@@ -318,8 +292,6 @@ def test_switch_without_edits_needs_no_modal(open_page):
     )
 
 
-import pytest
-
 PRESERVATION_DATA = {"empty": {}, "literal.key": "007", "large": 9007199254740993,
                      "array": [None, False, {}, {"a.b": [9007199254740993]}]}
 
@@ -346,34 +318,6 @@ def test_unrelated_apply_preserves_complete_inactive_data(open_page, tmp_path, e
         assert "ENV_TOKENS" not in saved
         assert json.dumps(saved["LLM_PROVIDERS"], sort_keys=True) == json.dumps({"claude": entry}, sort_keys=True)
         assert saved["FUTURE_TOP"] == PRESERVATION_DATA
-
-
-@pytest.mark.parametrize("providers", [None, [], "dormant", {"claude": None},
-                                      {"newprovider": {"url": "http://localhost", "model": "future"}}])
-def test_dormant_provider_shapes_render_and_survive_apply(open_page, tmp_path, providers):
-    page = open_page({"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDERS": providers})
-    assert frame_ids(page) == SUPPORTED_FRAMES
-    saved = apply_quality(page, tmp_path)
-    assert saved["LLM_PROVIDERS"] == providers
-
-
-def test_missing_ai_fields_stay_missing_after_unrelated_apply(open_page, tmp_path):
-    page = open_page({"ENABLE_LLM_INFERENCE": False})
-    saved = apply_quality(page, tmp_path)
-    assert "LLM_PROVIDERS" not in saved
-    assert "LLM_MAX_RETRIES" not in saved
-
-
-def test_ai_edits_made_before_disabling_are_saved(open_page, tmp_path):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama",
-                      "LLM_PROVIDERS": {"ollama": {"future": PRESERVATION_DATA}}})
-    open_ai_tab(page)
-    page.fill('input[name="LLM_PROVIDERS.ollama.model"]', "edited-model")
-    page.evaluate("window.switchTab('general')")
-    page.select_option('[name="ENABLE_LLM_INFERENCE"]', 'false')
-    saved = apply_quality(page, tmp_path)
-    assert saved["ENABLE_LLM_INFERENCE"] is False
-    assert saved["LLM_PROVIDERS"] == {"ollama": {"model": "edited-model", "future": PRESERVATION_DATA}}
 
 
 def test_provider_revert_and_discard_do_not_materialize_defaults(open_page, tmp_path):
@@ -408,57 +352,6 @@ def test_preservation_assertion_detects_default_leakage(open_page, tmp_path, res
             assert_preserved()
     else:
         assert_preserved()
-
-
-def test_large_known_integer_can_be_edited_without_rounding(open_page, tmp_path):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama",
-                      "LLM_MAX_RETRIES": 9007199254740993})
-    open_ai_tab(page)
-    field = page.locator('[name="LLM_MAX_RETRIES"]')
-    assert field.input_value() == '9007199254740993'
-    field.fill('9007199254740994')
-    assert page.evaluate('window.hasUnsavedEdits()')
-    with page.expect_response('**/api/settings/commit') as response:
-        page.click('#btn-apply')
-    assert response.value.status == 200
-    saved = json.loads((tmp_path / 'settings.json').read_text(encoding='utf-8'))
-    assert saved['LLM_MAX_RETRIES'] == 9007199254740994
-
-
-from pathlib import Path
-LOCALES = sorted(path.stem for path in (Path(__file__).resolve().parents[2] / 'src' / 'locales').glob('*.json'))
-
-
-@pytest.mark.parametrize('locale', LOCALES)
-def test_unknown_provider_is_visible_and_can_be_repaired(open_page, tmp_path, locale):
-    page = open_page({"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDER": "future-provider",
-                      "LLM_PROVIDERS": {"future-provider": PRESERVATION_DATA}})
-    print(f"Provider visual evidence: {tmp_path}")
-    page.set_viewport_size({'width': 1280, 'height': 800})
-    page.evaluate('(locale) => changeLanguage(locale)', locale)
-    open_ai_tab(page)
-    assert page.locator('#LLM_PROVIDER').input_value() == 'future-provider'
-    assert frame_ids(page) == SUPPORTED_FRAMES
-    assert not page.evaluate('window.hasUnsavedEdits()')
-    page.locator('#LLM_PROVIDER').scroll_into_view_if_needed()
-    page.screenshot(path=str(tmp_path / f'provider-dormant-{locale}.png'))
-    page.evaluate("window.switchTab('general')")
-    page.select_option('#ENABLE_LLM_INFERENCE', 'true')
-    with page.expect_response('**/api/settings/commit') as response:
-        page.click('#btn-apply')
-    assert response.value.status == 400
-    assert response.value.json()['errors'] == {
-        'LLM_PROVIDER': {'type': 'i18n', 'value': 'err_unknown_provider'}}
-    open_ai_tab(page)
-    locale_path = Path(__file__).resolve().parents[2] / 'src' / 'locales' / f'{locale}.json'
-    expected_error = json.loads(locale_path.read_text(encoding='utf-8'))['err_unknown_provider']
-    assert page.locator('#err-LLM_PROVIDER').inner_text() == '\u26a0\ufe0f ' + expected_error
-    page.locator('#LLM_PROVIDER').scroll_into_view_if_needed()
-    page.screenshot(path=str(tmp_path / f'provider-error-{locale}.png'))
-    page.select_option('#LLM_PROVIDER', 'ollama')
-    saved = apply_quality(page, tmp_path)
-    assert saved['LLM_PROVIDER'] == 'ollama'
-    assert saved['LLM_PROVIDERS'] == {'future-provider': PRESERVATION_DATA}
 
 
 @pytest.mark.parametrize('providers', [None, {'ollama': None}])

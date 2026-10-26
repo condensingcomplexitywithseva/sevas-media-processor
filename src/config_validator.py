@@ -14,6 +14,7 @@ from schemas import OverallResult
 from range_parsers import PageRangeSelector, VideoSelector
 from fs_utils import folder_setting_problem, path_setting_text, read_prompt, get_safe_path
 from user_data import DEFAULT_INPUT_FOLDER, DEFAULT_OUTPUT_FOLDER
+from edition import DEFAULT_PROVIDER, PROVIDERS
 import copy
 import json
 
@@ -102,66 +103,23 @@ class ProviderConfig(BaseModel):
         return value
 
 def _default_provider_configs() -> dict[str, ProviderConfig]:
-    return {
-        "openai": ProviderConfig(
-            url="https://api.openai.com/v1/chat/completions",
-            model="gpt-5.6",
-            max_tokens_field="max_completion_tokens",
-            reasoning_handling="preserve"
-        ),
-        "claude": ProviderConfig(
-            url="https://api.anthropic.com/v1/messages",
-            model="claude-sonnet-5",
-            auth_header_key="x-api-key",
-            auth_header_format="{token}",
-            extra_header_key="anthropic-version",
-            extra_header_value="2023-06-01",
-            require_max_tokens=True,
-            system_prompt_location="top_level",
-            image_payload_style="base64_dict",
-            response_extraction_path="content[0].text",
-            reasoning_handling="parse_claude_blocks"
-        ),
-        "gemini": ProviderConfig(
-            url="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-            model="gemini-3.8-flash",
-            reasoning_handling="preserve"
-        ),
-        "deepseek": ProviderConfig(
-            url="https://api.deepseek.com/chat/completions",
-            model="deepseek-v4-flash-vision-exp",
-            reasoning_handling="ignore_api_field"
-        ),
-        "mistral": ProviderConfig(
-            url="https://api.mistral.ai/v1/chat/completions",
-            model="mistral-medium-latest",
-            reasoning_handling="preserve"
-        ),
-        "zai": ProviderConfig(
-            url="https://api.z.ai/api/paas/v4/chat/completions",
-            model="GLM-4.6V-Flash",
-            reasoning_handling="preserve"
-        ),
-        "ollama": ProviderConfig(
-            url="http://localhost:11434/v1/chat/completions",
-            model="qwen3.5:0.8b",
-            auth_header_key="",
-            auth_header_format="",
-            reasoning_handling="strip_xml"
-        ),
-        "lm-studio": ProviderConfig(
-            url="http://localhost:1234/v1/chat/completions",
-            model="qwen/qwen3.5-2b",
-            auth_header_key="",
-            auth_header_format="",
-            reasoning_handling="strip_xml"
-        ),
-        "custom": ProviderConfig(
-            url="",
-            model="",
-            reasoning_handling="preserve"
-        )
-    }
+    return {name: ProviderConfig(**spec["preset"]) for name, spec in PROVIDERS.items()}
+
+
+LOCAL_PROVIDERS: frozenset[str] = frozenset(name for name, spec in PROVIDERS.items() if spec["local"])
+
+
+def provider_needs_token(provider: str) -> bool:
+    spec = PROVIDERS.get(provider)
+    return spec is None or bool(spec["needs_token"])
+
+
+def token_env_key(provider: str) -> str:
+    return f"{provider.upper().replace('-', '_')}_TOKEN"
+
+
+def token_key_provider(key: str) -> str:
+    return key.removesuffix("_TOKEN").lower().replace("_", "-")
 
 
 def provider_entry(providers: Any, selected: str) -> Any:
@@ -199,8 +157,8 @@ class Settings(BaseModel):
     NO_RETRY_STATUSES: list[OverallResult] = Field(default=[OverallResult.OK], json_schema_extra={'tab': 'general'})
 
     ENABLE_LLM_INFERENCE: bool = Field(default=False, json_schema_extra={'tab': 'general'})
-    LLM_PROVIDER: str = Field(default="gemini",
-                              pattern="^(openai|claude|gemini|deepseek|mistral|zai|ollama|lm-studio|custom)$",
+    LLM_PROVIDER: str = Field(default=DEFAULT_PROVIDER,
+                              pattern=f"^({'|'.join(PROVIDERS)})$",
                               json_schema_extra={'tab': 'ai'})
 
     LLM_PROVIDERS: dict[str, Any] = Field(
@@ -470,10 +428,8 @@ def validate_business_rules(
             if not str(provider_cfg.get("model") or "").strip():
                 errors.append((f"LLM_PROVIDERS.{provider}.model", "err_missing_model"))
 
-            if provider not in ["ollama", "lm-studio", "custom"]:
-                token_env_key = f"{provider.upper().replace('-', '_')}_TOKEN"
-                if not env_tokens.get(token_env_key):
-                    errors.append((f"ENV_TOKENS.{provider}", "err_missing_token"))
+            if provider_needs_token(provider) and not env_tokens.get(token_env_key(provider)):
+                errors.append((f"ENV_TOKENS.{provider}", "err_missing_token"))
 
         def check_prompt(val, mode, field):
             v = str(val or "").strip()

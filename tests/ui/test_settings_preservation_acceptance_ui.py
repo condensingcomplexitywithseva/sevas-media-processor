@@ -5,6 +5,8 @@ import json
 
 import pytest
 
+from fake_llm.harness import READY_ENTRY, ready_ai
+
 
 def saved(tmp_path):
     return json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
@@ -21,11 +23,10 @@ def apply(page):
 @pytest.mark.parametrize("field,old,new,selector,tab", [
     ("MAX_DIMENSION", 1920, 1234, '[name="MAX_DIMENSION"]', "output"),
     ("LLM_USER_PROMPT", "original", "external prompt", '#user_text_input', "ai"),
-    ("LLM_PROVIDER", "ollama", "lm-studio", '#LLM_PROVIDER', "ai"),
 ])
 def test_apply_reconciles_untouched_controls_with_fresh_disk_values(
         open_page, tmp_path, field, old, new, selector, tab):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama", field: old})
+    page = open_page({**ready_ai(), field: old})
     raw = saved(tmp_path)
     raw[field] = new
     raw["external.future"] = {"empty": {}, "large": 9007199254740993}
@@ -46,17 +47,17 @@ def test_apply_reconciles_untouched_controls_with_fresh_disk_values(
     ("LLM_USER_PROMPT", "#user_text_input", {"a": 1}, '{"a": 1}'),
     ("LLM_SYSTEM_PROMPT", "#sys_text_input", ["answer"], '["answer"]'),
     ("LLM_OUTPUT_COLUMNS", '[name="LLM_OUTPUT_COLUMNS"]', 123, "123"),
-    ("LLM_PROVIDERS.ollama.model", '[name="LLM_PROVIDERS.ollama.model"]', 123, "123"),
-    ("LLM_PROVIDERS.ollama.extra_header_value", '[name="LLM_PROVIDERS.ollama.extra_header_value"]', None, ""),
+    ("LLM_PROVIDERS.custom.model", '[name="LLM_PROVIDERS.custom.model"]', 123, "123"),
+    ("LLM_PROVIDERS.custom.extra_header_value", '[name="LLM_PROVIDERS.custom.extra_header_value"]', None, ""),
 ])
 @pytest.mark.parametrize("distinct_text", [False, True], ids=["same-display", "different-display"])
 def test_explicit_text_repair_is_not_confused_with_invalid_stored_type(
         open_page, tmp_path, field, selector, bad, text, distinct_text):
     if distinct_text:
         text = "repaired"
-    raw = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"}
+    raw = ready_ai()
     if field.startswith("LLM_PROVIDERS."):
-        raw["LLM_PROVIDERS"] = {"ollama": {field.split(".")[-1]: bad}}
+        raw["LLM_PROVIDERS"]["custom"][field.split(".")[-1]] = bad
     else:
         raw[field] = bad
     page = open_page(raw)
@@ -70,35 +71,23 @@ def test_explicit_text_repair_is_not_confused_with_invalid_stored_type(
         "a valid string repair must differ from the invalid stored JSON type")
     apply(page)
     result = saved(tmp_path)
-    actual = (result["LLM_PROVIDERS"]["ollama"][field.split(".")[-1]]
+    actual = (result["LLM_PROVIDERS"]["custom"][field.split(".")[-1]]
               if field.startswith("LLM_PROVIDERS.") else result[field])
     assert type(actual) is str and actual == text
     assert page.locator("#btn-start").is_enabled()
 
 
-@pytest.mark.parametrize("providers", [None, {"ollama": None}, {"ollama": []}])
-def test_repairing_provider_refreshes_derived_defaults_in_all_controls(open_page, tmp_path, providers):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama", "LLM_PROVIDERS": providers})
-    page.evaluate("window.switchTab('ai')")
-    page.fill('[name="LLM_PROVIDERS.ollama.url"]', "http://127.0.0.1:9/no-request")
-    data = apply(page)
-    assert saved(tmp_path)["LLM_PROVIDERS"] == {"ollama": {"url": "http://127.0.0.1:9/no-request"}}
-    view = data["settings"]["LLM_PROVIDERS"]["ollama"]
-    for field in ("model", "max_tokens", "response_extraction_path"):
-        assert page.locator(f'[name="LLM_PROVIDERS.ollama.{field}"]').input_value() == str(view[field]), field
-
-
 @pytest.mark.parametrize("field,selector", [
     ("LLM_MAX_RETRIES", '[name="LLM_MAX_RETRIES"]'),
-    ("LLM_PROVIDERS.ollama.max_tokens", '[name="LLM_PROVIDERS.ollama.max_tokens"]'),
+    ("LLM_PROVIDERS.custom.max_tokens", '[name="LLM_PROVIDERS.custom.max_tokens"]'),
 ])
 @pytest.mark.parametrize("original,edited", [(9007199254740992, "9007199254740993"),
                                             (9007199254740993, "09007199254740993"),
                                             (9007199254740993, "9007199254740992")])
 def test_exact_integer_edit_and_equivalent_spelling_controls(open_page, tmp_path, field, selector, original, edited):
-    raw = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"}
+    raw = ready_ai()
     if field.startswith("LLM_PROVIDERS."):
-        raw["LLM_PROVIDERS"] = {"ollama": {"max_tokens": original}}
+        raw["LLM_PROVIDERS"]["custom"]["max_tokens"] = original
     else:
         raw[field] = original
     page = open_page(raw)
@@ -109,31 +98,30 @@ def test_exact_integer_edit_and_equivalent_spelling_controls(open_page, tmp_path
     page.fill('[name="JPEG_QUALITY"]', "81")
     apply(page)
     result = saved(tmp_path)
-    value = result["LLM_PROVIDERS"]["ollama"]["max_tokens"] if field.startswith("LLM_PROVIDERS.") else result[field]
+    value = result["LLM_PROVIDERS"]["custom"]["max_tokens"] if field.startswith("LLM_PROVIDERS.") else result[field]
     assert type(value) is int and value == int(edited)
 
 
 @pytest.mark.parametrize("bad", [None, "garbage", {}, []])
 def test_invalid_checkbox_can_be_explicitly_repaired_to_false(open_page, tmp_path, bad):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama",
-                      "LLM_PROVIDERS": {"ollama": {"require_max_tokens": bad}}})
+    page = open_page(ready_ai(require_max_tokens=bad))
     page.evaluate("window.switchTab('ai')")
-    box = page.locator("#req_max_ollama")
+    box = page.locator("#req_max_custom")
     box.check()
     box.uncheck()
     assert page.evaluate("window.hasUnsavedEdits()")
     apply(page)
-    assert saved(tmp_path)["LLM_PROVIDERS"]["ollama"]["require_max_tokens"] is False
+    assert saved(tmp_path)["LLM_PROVIDERS"]["custom"]["require_max_tokens"] is False
 
 
 @pytest.mark.parametrize("field,selector", [
     ("LLM_OUTPUT_COLUMNS", '[name="LLM_OUTPUT_COLUMNS"]'),
-    ("LLM_PROVIDERS.ollama.model", '[name="LLM_PROVIDERS.ollama.model"]'),
+    ("LLM_PROVIDERS.custom.model", '[name="LLM_PROVIDERS.custom.model"]'),
 ])
 def test_explicit_string_repair_is_included_with_an_unrelated_edit(open_page, tmp_path, field, selector):
-    raw = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"}
+    raw = ready_ai()
     if field.startswith("LLM_PROVIDERS."):
-        raw["LLM_PROVIDERS"] = {"ollama": {"model": 123}}
+        raw["LLM_PROVIDERS"]["custom"]["model"] = 123
     else:
         raw[field] = 123
     page = open_page(raw)
@@ -144,7 +132,7 @@ def test_explicit_string_repair_is_included_with_an_unrelated_edit(open_page, tm
     page.fill('[name="JPEG_QUALITY"]', "81")
     apply(page)
     result = saved(tmp_path)
-    value = result["LLM_PROVIDERS"]["ollama"]["model"] if field.startswith("LLM_PROVIDERS.") else result[field]
+    value = result["LLM_PROVIDERS"]["custom"]["model"] if field.startswith("LLM_PROVIDERS.") else result[field]
     assert type(value) is str and value == "123"
 
 
@@ -152,11 +140,11 @@ def test_explicit_string_repair_is_included_with_an_unrelated_edit(open_page, tm
     ("LLM_MAX_RETRIES", '[name="LLM_MAX_RETRIES"]', "0007", "text"),
     ("LLM_USER_PROMPT", '#user_text_input', 'new prompt <literal>', "text"),
     ("HALT_ON_LLM_PARSE_ERROR", '[name="HALT_ON_LLM_PARSE_ERROR"][type="checkbox"]', False, "checkbox"),
-    ("LLM_PROVIDERS.ollama.max_tokens", '[name="LLM_PROVIDERS.ollama.max_tokens"]', "00127", "text"),
+    ("LLM_PROVIDERS.custom.max_tokens", '[name="LLM_PROVIDERS.custom.max_tokens"]', "00127", "text"),
 ])
 def test_explicit_edit_before_disabling_ai_retains_its_submitted_value(
         open_page, tmp_path, field, selector, text, kind):
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"})
+    page = open_page(ready_ai())
     page.evaluate("window.switchTab('ai')")
     if kind == "checkbox":
         page.locator(selector).uncheck()
@@ -166,7 +154,7 @@ def test_explicit_edit_before_disabling_ai_retains_its_submitted_value(
     page.select_option('#ENABLE_LLM_INFERENCE', 'false')
     apply(page)
     result = saved(tmp_path)
-    value = result["LLM_PROVIDERS"]["ollama"]["max_tokens"] if field.startswith("LLM_PROVIDERS.") else result[field]
+    value = result["LLM_PROVIDERS"]["custom"]["max_tokens"] if field.startswith("LLM_PROVIDERS.") else result[field]
     assert type(value) is type(text) and value == text
     assert result["ENABLE_LLM_INFERENCE"] is False
 
@@ -270,65 +258,22 @@ def test_lost_reply_cannot_claim_old_values_are_saved(open_page, tmp_path):
 
 def test_later_token_edit_is_not_cleared_by_old_save_reply(open_page, tmp_path):
     import config_loader
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama'})
+    page = open_page(ready_ai())
     hold_save_reply(page)
     page.evaluate("window.switchTab('ai')")
-    token = page.locator('#prov_token_ollama')
+    token = page.locator('#prov_token_custom')
     token.fill('fake-submitted-token')
     page.click('#btn-apply')
     page.wait_for_function('typeof releaseSaveReply === "function"')
     token.fill('fake-later-token')
     release_save_reply(page)
-    assert config_loader._manager.get_env_tokens()['OLLAMA_TOKEN'] == 'fake-submitted-token'
+    assert config_loader._manager.get_env_tokens()['CUSTOM_TOKEN'] == 'fake-submitted-token'
     assert token.input_value() == 'fake-later-token'
-    assert page.evaluate('window.draftState["ENV_TOKENS.ollama"]') == 'fake-later-token'
+    assert page.evaluate('window.draftState["ENV_TOKENS.custom"]') == 'fake-later-token'
     apply(page)
-    assert config_loader._manager.get_env_tokens()['OLLAMA_TOKEN'] == 'fake-later-token'
+    assert config_loader._manager.get_env_tokens()['CUSTOM_TOKEN'] == 'fake-later-token'
     assert token.input_value() == ''
     assert 'ENV_TOKENS' not in saved(tmp_path)
-
-
-def test_provider_switch_during_save_keeps_hidden_frame_clean(open_page, tmp_path):
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama',
-                      'LLM_PROVIDERS': {'ollama': {'model': 'old'}}})
-    hold_save_reply(page)
-    page.evaluate("window.switchTab('ai')")
-    page.fill('[name="LLM_PROVIDERS.ollama.model"]', 'submitted')
-    page.click('#btn-apply')
-    page.wait_for_function('typeof releaseSaveReply === "function"')
-    page.select_option('#LLM_PROVIDER', 'lm-studio')
-    page.click('#modal-ok')
-    release_save_reply(page)
-    assert page.locator('#LLM_PROVIDER').input_value() == 'lm-studio'
-    assert page.locator('#provider-lm-studio').is_visible()
-    assert not page.locator('#provider-ollama .dirty-field').count()
-    assert page.evaluate('window.draftState["LLM_PROVIDERS.ollama.model"]') == 'submitted'
-    apply(page)
-    assert saved(tmp_path)['LLM_PROVIDER'] == 'lm-studio'
-    assert saved(tmp_path)['LLM_PROVIDERS']['ollama']['model'] == 'submitted'
-
-
-def test_acknowledgment_refreshes_prompt_mode_and_provider_frame(open_page, tmp_path):
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama', 'LLM_USER_PROMPT': 'old'})
-    prompt = tmp_path / 'prompt.txt'
-    prompt.write_text('file prompt', encoding='utf-8')
-    raw = saved(tmp_path)
-    raw.update(LLM_PROVIDER='lm-studio', LLM_USER_PROMPT_MODE='FILE', LLM_USER_PROMPT=str(prompt))
-    (tmp_path / 'settings.json').write_text(json.dumps(raw), encoding='utf-8')
-    page.evaluate("window.switchTab('output')")
-    page.fill('[name="JPEG_QUALITY"]', '81')
-    apply(page)
-    page.evaluate("window.switchTab('ai')")
-    assert page.locator('#LLM_PROVIDER').input_value() == 'lm-studio'
-    assert page.locator('#provider-lm-studio').is_visible()
-    assert page.locator('#provider-ollama').is_hidden()
-    assert page.locator('#user_prompt_mode').input_value() == 'FILE'
-    assert page.locator('#user_file_input').is_enabled()
-    assert page.locator('#user_text_input').is_disabled()
-    assert page.locator('#user_file_input').input_value() == str(prompt)
-    page.wait_for_function("document.getElementById('user_file_preview').textContent.includes('file prompt')")
-    page.select_option('#LLM_PROVIDER', 'ollama')
-    assert not page.locator('#modal-overlay').is_visible()
 
 
 def test_stop_remains_available_during_settings_save(open_page):
@@ -347,24 +292,8 @@ def test_stop_remains_available_during_settings_save(open_page):
 
 
 
-def test_later_read_only_inspection_survives_acknowledgment(open_page):
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama'})
-    hold_save_reply(page)
-    page.evaluate("window.switchTab('output')")
-    page.fill('[name="JPEG_QUALITY"]', '81')
-    page.click('#btn-apply')
-    page.wait_for_function('typeof releaseSaveReply === "function"')
-    page.evaluate("goToField('LLM_PROVIDERS.claude.model')")
-    page.wait_for_function("document.activeElement.name === 'LLM_PROVIDERS.claude.model'")
-    release_save_reply(page)
-    assert page.locator('#provider-claude').get_attribute('data-provider-inspection') == 'true'
-    assert page.locator('#provider-claude').is_visible()
-    assert page.evaluate('document.activeElement.name') == 'LLM_PROVIDERS.claude.model'
-    assert not page.evaluate('window.hasUnsavedEdits()')
-
-
 def test_later_prompt_edit_keeps_its_mode_when_disk_mode_changed(open_page, tmp_path):
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama', 'LLM_USER_PROMPT': 'original'})
+    page = open_page({**ready_ai(), 'LLM_USER_PROMPT': 'original'})
     prompt = tmp_path / 'prompt.txt'
     prompt.write_text('file prompt', encoding='utf-8')
     raw = saved(tmp_path)
@@ -388,7 +317,7 @@ def test_later_prompt_edit_keeps_its_mode_when_disk_mode_changed(open_page, tmp_
 
 
 def test_discard_clears_same_display_repair_intent(open_page):
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama', 'LLM_USER_PROMPT': {'a': 1}})
+    page = open_page({**ready_ai(), 'LLM_USER_PROMPT': {'a': 1}})
     page.evaluate("window.switchTab('ai')")
     page.fill('#user_text_input', 'temporary')
     page.fill('#user_text_input', '{"a": 1}')
@@ -471,121 +400,6 @@ def test_original_stale_control_assertion_still_detects_missing_sync(
         check()
 
 
-@pytest.mark.parametrize('lose_reply', [False, True], ids=['confirmed-control', 'lost-reply'])
-@pytest.mark.parametrize('switch_timing', ['before-reply', 'after-reply'])
-def test_provider_discard_cannot_undo_submitted_save_on_retry(open_page, tmp_path, lose_reply, switch_timing):
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'ollama',
-                      'LLM_PROVIDERS': {'ollama': {'model': 'old'}}})
-    hold_save_reply(page)
-    page.evaluate("window.switchTab('ai')")
-    page.fill('[name="LLM_PROVIDERS.ollama.model"]', 'submitted')
-    page.click('#btn-apply')
-    page.wait_for_function('typeof releaseSaveReply === "function"')
-    assert saved(tmp_path)['LLM_PROVIDERS']['ollama']['model'] == 'submitted'
-    def switch():
-        page.select_option('#LLM_PROVIDER', 'lm-studio')
-        if page.locator('#modal-overlay').is_visible():
-            page.click('#modal-ok')
-    if switch_timing == 'before-reply':
-        switch()
-    release_save_reply(page, lose=lose_reply)
-    if page.locator('#modal-overlay').is_visible():
-        page.click('#modal-ok')
-    if switch_timing == 'after-reply':
-        switch()
-    apply(page)
-    result = saved(tmp_path)
-    assert result['LLM_PROVIDER'] == 'lm-studio'
-    assert result['LLM_PROVIDERS']['ollama']['model'] == 'submitted', (
-        'provider-frame discard silently undid an already submitted save during retry')
-
-
-@pytest.mark.parametrize('wipe_before_reply', [False, True], ids=['ordered-control', 'delayed-apply-reply'])
-def test_save_reply_cannot_restore_a_wiped_token_view(open_page, tmp_path, wipe_before_reply):
-    import config_loader
-    page = open_page({'ENABLE_LLM_INFERENCE': True, 'LLM_PROVIDER': 'openai'},
-                     tokens={'openai': 'sk-fake0123456789abcdef0123456789abcdef'})
-    hold_save_reply(page)
-    page.evaluate("window.switchTab('output')")
-    page.fill('[name="JPEG_QUALITY"]', '81')
-    page.click('#btn-apply')
-    page.wait_for_function('typeof releaseSaveReply === "function"')
-    if not wipe_before_reply:
-        release_save_reply(page)
-    page.evaluate("window.switchTab('ai')")
-    page.locator('#provider-openai button[onclick*="wipeToken"]').click()
-    with page.expect_response('**/api/settings/wipe_token') as reply:
-        page.click('#modal-ok')
-    assert reply.value.status == 200
-    page.wait_for_function("'ENV_TOKENS.openai' in window.diskErrors")
-    assert config_loader._manager.get_env_tokens() == {}
-    if wipe_before_reply:
-        release_save_reply(page)
-    assert 'ENV_TOKENS.openai' in config_loader._manager.load_for_ui()[1]
-    observed = page.evaluate("""() => ({
-        missing: 'ENV_TOKENS.openai' in window.diskErrors,
-        blocked: document.getElementById('btn-start').disabled,
-        placeholder: document.getElementById('prov_token_openai').placeholder
-    })""")
-    assert observed['missing'] and observed['blocked'] and observed['placeholder'] != '********', observed
-
-
-@pytest.mark.parametrize(
-    "field,old,new",
-    [
-        ("model", "old", "submitted"),
-        ("max_tokens", 8, 9),
-        ("require_max_tokens", False, True),
-    ],
-)
-@pytest.mark.parametrize("timing", ["before", "after"])
-@pytest.mark.parametrize("lose", [False, True])
-def test_provider_retry_preserves_complete_entry(open_page, tmp_path, field, old, new, timing, lose):
-    opaque = {"a.b": {"empty": {}, "integer": 9007199254740993}, "boolean": "false"}
-    page = open_page(
-        {
-            "ENABLE_LLM_INFERENCE": True,
-            "LLM_PROVIDER": "ollama",
-            "LLM_PROVIDERS": {"ollama": {field: old, "future": opaque}},
-        }
-    )
-    hold_save_reply(page)
-    page.evaluate("window.switchTab('ai')")
-    selector = '[name="LLM_PROVIDERS.ollama.' + field + '"]'
-    if isinstance(new, bool):
-        page.locator(selector + '[type="checkbox"]').set_checked(new)
-    else:
-        page.fill(selector, str(new))
-    page.click("#btn-apply")
-    page.wait_for_function('typeof releaseSaveReply === "function"')
-    expected = {field: new, "future": opaque}
-    assert json.dumps(saved(tmp_path)["LLM_PROVIDERS"]["ollama"], sort_keys=True) == json.dumps(
-        expected, sort_keys=True
-    )
-
-    def switch():
-        page.select_option("#LLM_PROVIDER", "lm-studio")
-        if page.locator("#modal-overlay").is_visible():
-            page.click("#modal-ok")
-
-    if timing == "before":
-        switch()
-    release_save_reply(page, lose=lose)
-    if page.locator("#modal-overlay").is_visible():
-        page.click("#modal-ok")
-    if timing == "after":
-        switch()
-    requests = []
-    page.on("request", lambda r: requests.append(r.post_data_json) if r.url.endswith("/api/settings/commit") else None)
-    apply(page)
-    assert json.dumps(saved(tmp_path)["LLM_PROVIDERS"]["ollama"], sort_keys=True) == json.dumps(
-        expected, sort_keys=True
-    )
-    assert saved(tmp_path)["LLM_PROVIDER"] == "lm-studio"
-    allowed = {"LLM_PROVIDER", "LLM_PROVIDERS.ollama." + field}
-    assert all(set(r["edits"]) <= allowed for r in requests), requests
-
-
 def hold_operation_reply(page, path):
     page.evaluate(
         """path => {
@@ -603,34 +417,62 @@ def hold_operation_reply(page, path):
     )
 
 
+WIPED = '!Object.hasOwn(window.rawOriginalState.ENV_TOKENS, "custom")'
+
+
+@pytest.mark.parametrize('wipe_before_reply', [False, True], ids=['ordered-control', 'delayed-apply-reply'])
+def test_save_reply_cannot_restore_a_wiped_token_view(open_page, tmp_path, wipe_before_reply):
+    import config_loader
+    page = open_page(ready_ai(), tokens={'custom': 'sk-fake0123456789abcdef0123456789abcdef'})
+    hold_save_reply(page)
+    page.evaluate("window.switchTab('output')")
+    page.fill('[name="JPEG_QUALITY"]', '81')
+    page.click('#btn-apply')
+    page.wait_for_function('typeof releaseSaveReply === "function"')
+    if not wipe_before_reply:
+        release_save_reply(page)
+    page.evaluate("window.switchTab('ai')")
+    page.locator('#provider-custom button[onclick*="wipeToken"]').click()
+    with page.expect_response('**/api/settings/wipe_token') as reply:
+        page.click('#modal-ok')
+    assert reply.value.status == 200
+    page.wait_for_function(WIPED)
+    assert config_loader._manager.get_env_tokens() == {}
+    if wipe_before_reply:
+        release_save_reply(page)
+    observed = page.evaluate(f"""() => ({{
+        wiped: {WIPED},
+        placeholder: document.getElementById('prov_token_custom').placeholder
+    }})""")
+    assert observed['wiped'] and observed['placeholder'] != '********', observed
+    assert saved(tmp_path)['JPEG_QUALITY'] == 81
+
+
 @pytest.mark.parametrize("delayed", [False, True])
 def test_token_edit_after_wipe_request_survives_reply(open_page, tmp_path, delayed):
     import config_loader
 
-    page = open_page(
-        {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai"},
-        tokens={"openai": "sk-fake0123456789abcdef0123456789abcdef"},
-    )
+    page = open_page(ready_ai(), tokens={"custom": "sk-fake0123456789abcdef0123456789abcdef"})
     page.evaluate("window.switchTab('ai')")
     if delayed:
         hold_operation_reply(page, "/api/settings/wipe_token")
-    page.locator('#provider-openai button[onclick*="wipeToken"]').click()
+    page.locator('#provider-custom button[onclick*="wipeToken"]').click()
     page.click("#modal-ok")
     if delayed:
         page.wait_for_function('typeof releaseOperation === "function"')
     else:
-        page.wait_for_function("'ENV_TOKENS.openai' in window.diskErrors")
+        page.wait_for_function(WIPED)
     replacement = "sk-fake0123456789abcdef0123456789"
-    page.fill("#prov_token_openai", replacement)
+    page.fill("#prov_token_custom", replacement)
     if delayed:
         page.evaluate("() => { releaseOperation(); }")
-        page.wait_for_function("'ENV_TOKENS.openai' in window.diskErrors")
-    assert page.locator("#prov_token_openai").input_value() == replacement, "later token edit must survive"
-    assert page.evaluate('window.draftState["ENV_TOKENS.openai"]') == replacement
+        page.wait_for_function(WIPED)
+    assert page.locator("#prov_token_custom").input_value() == replacement, "later token edit must survive"
+    assert page.evaluate('window.draftState["ENV_TOKENS.custom"]') == replacement
     assert page.locator("#btn-apply").is_enabled()
     assert not config_loader._manager.get_env_tokens()
     apply(page)
-    assert config_loader._manager.get_env_tokens()["OPENAI_TOKEN"] == replacement
+    assert config_loader._manager.get_env_tokens()["CUSTOM_TOKEN"] == replacement
     assert "ENV_TOKENS" not in saved(tmp_path)
 
 
@@ -672,22 +514,22 @@ def test_retry_resolves_original_submission_before_later_edits(open_page, tmp_pa
 def test_wipe_after_unconfirmed_save_does_not_resave_old_token(open_page, tmp_path, later):
     import config_loader
 
-    page = open_page({"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama"})
+    page = open_page(ready_ai())
     hold_save_reply(page)
     page.evaluate("window.switchTab('ai')")
-    page.fill("#prov_token_ollama", "fake-submitted")
+    page.fill("#prov_token_custom", "fake-submitted")
     page.click("#btn-apply")
     page.wait_for_function('typeof releaseSaveReply === "function"')
     release_save_reply(page, lose=True)
     page.click("#modal-ok")
-    page.locator('#provider-ollama button[onclick*="wipeToken"]').click()
+    page.locator('#provider-custom button[onclick*="wipeToken"]').click()
     with page.expect_response("**/api/settings/wipe_token"):
         page.click("#modal-ok")
-    page.wait_for_function('!Object.hasOwn(window.draftState, "ENV_TOKENS.ollama")')
+    page.wait_for_function('!Object.hasOwn(window.draftState, "ENV_TOKENS.custom")')
     if later:
-        page.fill("#prov_token_ollama", "fake-new-explicit")
+        page.fill("#prov_token_custom", "fake-new-explicit")
     apply(page)
-    assert config_loader._manager.get_env_tokens() == ({"OLLAMA_TOKEN": "fake-new-explicit"} if later else {})
+    assert config_loader._manager.get_env_tokens() == ({"CUSTOM_TOKEN": "fake-new-explicit"} if later else {})
     assert "ENV_TOKENS" not in saved(tmp_path)
 
 
@@ -723,86 +565,11 @@ def test_old_reset_reply_cannot_replace_later_apply(open_page, tmp_path):
     assert page.evaluate("window.diskErrors") == {}
 
 
-def test_stale_token_view_does_not_bypass_actual_start_validation(open_page, monkeypatch):
-    from routes import execution_api
-
-    constructed = []
-
-    def forbidden(*args, **kwargs):
-        constructed.append(True)
-        raise AssertionError("No processing may be constructed")
-
-    monkeypatch.setattr(execution_api, "ProcessorCore", forbidden)
-    page = open_page(
-        {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai"},
-        tokens={"openai": "sk-fake0123456789abcdef0123456789abcdef"},
-    )
-    page.evaluate("window.switchTab('ai')")
-    page.locator('#provider-openai button[onclick*="wipeToken"]').click()
-    page.click("#modal-ok")
-    page.wait_for_function("'ENV_TOKENS.openai' in window.diskErrors")
-    result = page.evaluate("""async () => {
-        const response = await fetch('/api/process/start', {method:'POST'});
-        return {status:response.status, body:await response.json()};
-    }""")
-    assert result["status"] == 400 and "ENV_TOKENS.openai" in result["body"]["errors"]
-    assert not constructed
-
-
-@pytest.mark.parametrize("fault", ["none", "discard", "ordering", "wipe-edit"])
-def test_settings_interaction_oracles_detect_their_broken_counterparts(open_page, tmp_path, monkeypatch, fault):
-    from flask import Flask
-
-    changes = {
-        "discard": (
-            "const submitted = submission && Object.hasOwn(submission.edits, name)",
-            "const submitted = false && submission && Object.hasOwn(submission.edits, name)",
-        ),
-        "ordering": ("if (snapshot.revision <= settingsRevision) return false;", "if (false) return false;"),
-        "wipe-edit": ("if (fieldRevisions[name] === operation.revisions[name]) {", "if (true) {"),
-    }
-    if fault != "none":
-        original = Flask.send_static_file
-
-        def serve(app, filename):
-            response = original(app, filename)
-            if filename == "app.js":
-                response.direct_passthrough = False
-                source = response.get_data(as_text=True)
-                old, new = changes[fault]
-                assert source.count(old) == 1
-                source = source.replace(old, new)
-                if fault == "discard":
-                    old_discard = "if (submission) submission.discarded.add(name);"
-                    assert source.count(old_discard) == 1
-                    source = source.replace(old_discard, "if (false) submission.discarded.add(name);")
-                response.set_data(source)
-            return response
-
-        monkeypatch.setattr(Flask, "send_static_file", serve)
-
-    def check():
-        if fault == "discard":
-            test_provider_retry_preserves_complete_entry(
-                open_page, tmp_path, "model", "old", "submitted", "before", True
-            )
-        elif fault == "ordering":
-            test_save_reply_cannot_restore_a_wiped_token_view(open_page, tmp_path, True)
-        else:
-            test_token_edit_after_wipe_request_survives_reply(open_page, tmp_path, True)
-
-    if fault != "none":
-        with pytest.raises(AssertionError):
-            check()
-    else:
-        check()
-
-
 @pytest.mark.parametrize("operation", ["wipe_token", "reset"])
 def test_old_failed_operation_cannot_replace_newer_success(open_page, monkeypatch, operation):
     import routes.settings_api as api
 
-    page = open_page({}, tokens={"openai": "fake-stored-token"})
+    page = open_page({}, tokens={"custom": "fake-stored-token"})
     hold_operation_reply(page, "/api/settings/" + operation)
     target = "update_env_tokens" if operation == "wipe_token" else "save_settings"
     original = getattr(api, target)
@@ -812,34 +579,34 @@ def test_old_failed_operation_cannot_replace_newer_success(open_page, monkeypatc
 
     monkeypatch.setattr(api, target, fail_once)
     if operation == "wipe_token":
-        page.evaluate("() => { wipeToken('openai'); }")
+        page.evaluate("() => { wipeToken('custom'); }")
         page.click("#modal-ok")
     else:
         page.evaluate("resetSettings()")
     page.wait_for_function('typeof releaseOperation === "function"')
     monkeypatch.setattr(api, target, original)
     if operation == "wipe_token":
-        page.evaluate("() => { wipeToken('openai'); }")
+        page.evaluate("() => { wipeToken('custom'); }")
         page.click("#modal-ok")
-        page.wait_for_function('!Object.hasOwn(window.rawOriginalState.ENV_TOKENS, "openai")')
+        page.wait_for_function('!Object.hasOwn(window.rawOriginalState.ENV_TOKENS, "custom")')
     else:
         page.evaluate("resetSettings()")
         page.wait_for_function("window.diskErrors.general?.value === 'error_settings_reset'")
     page.evaluate("() => { releaseOperation(); }")
     page.evaluate("async () => { await new Promise(resolve => setTimeout(resolve, 0)); }")
-    owner = "wipe-openai" if operation == "wipe_token" else "reset"
+    owner = "wipe-custom" if operation == "wipe_token" else "reset"
     assert not page.evaluate("owner => window.notices.has(owner)", owner)
 
 
 def test_token_wipe_preserves_unrelated_rejected_draft_errors(open_page):
-    page = open_page({}, tokens={"openai": "fake-stored-token"})
+    page = open_page({}, tokens={"custom": "fake-stored-token"})
     page.evaluate("window.switchTab('output')")
     page.fill('[name="JPEG_QUALITY"]', "500")
     page.click("#btn-apply")
     page.wait_for_function('!window.settingsSavePending && window.applyErrors && "JPEG_QUALITY" in window.applyErrors')
-    page.evaluate("() => { wipeToken('openai'); }")
+    page.evaluate("() => { wipeToken('custom'); }")
     page.click("#modal-ok")
-    page.wait_for_function('!Object.hasOwn(window.rawOriginalState.ENV_TOKENS, "openai")')
+    page.wait_for_function('!Object.hasOwn(window.rawOriginalState.ENV_TOKENS, "custom")')
     assert page.evaluate('"JPEG_QUALITY" in window.applyErrors')
     assert page.locator('[name="JPEG_QUALITY"]').input_value() == "500"
     assert page.locator("#btn-apply").is_enabled()
@@ -886,11 +653,11 @@ def test_operation_conflict_and_unknown_receipt_are_translated(open_page, tmp_pa
 
 def test_retry_after_ai_is_disabled_preserves_normalized_submitted_value(open_page, tmp_path):
     page = open_page(
-        {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "ollama", "LLM_PROVIDERS": {"ollama": {"max_tokens": 8}}}
+        ready_ai(max_tokens=8)
     )
     hold_save_reply(page)
     page.evaluate("window.switchTab('ai')")
-    page.fill('[name="LLM_PROVIDERS.ollama.max_tokens"]', "9")
+    page.fill('[name="LLM_PROVIDERS.custom.max_tokens"]', "9")
     page.click("#btn-apply")
     page.wait_for_function('typeof releaseSaveReply === "function"')
     page.evaluate("window.switchTab('general')")
@@ -900,8 +667,8 @@ def test_retry_after_ai_is_disabled_preserves_normalized_submitted_value(open_pa
     apply(page)
     result = saved(tmp_path)
     assert result["ENABLE_LLM_INFERENCE"] is False
-    assert result["LLM_PROVIDERS"]["ollama"] == {"max_tokens": 9}
-    assert type(result["LLM_PROVIDERS"]["ollama"]["max_tokens"]) is int
+    assert result["LLM_PROVIDERS"]["custom"] == {**READY_ENTRY, "max_tokens": 9}
+    assert type(result["LLM_PROVIDERS"]["custom"]["max_tokens"]) is int
 
 
 @pytest.mark.parametrize("first_valid", [False, True])

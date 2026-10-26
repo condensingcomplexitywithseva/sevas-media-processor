@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+from fake_llm.harness import ready_ai
+
 LANGS = tuple(sorted(
     p.stem for p in (Path(__file__).resolve().parents[2] / "src" / "locales").glob("*.json")
 ))
@@ -11,7 +13,7 @@ TABS = ("general", "images", "docs", "animations", "videos", "output", "ai", "ex
 APP_WIDTH = 1264
 APP_HEIGHT = 800
 
-VALID_AI = {"ENABLE_LLM_INFERENCE": True, "LLM_PROVIDER": "openai"}
+VALID_AI = ready_ai()
 
 SWEEP = """
 (ctx) => {
@@ -90,7 +92,7 @@ SWEEP = """
 
 def test_every_visible_string_fits_its_slot(open_page):
     page = open_page(VALID_AI,
-                     tokens={"openai": "sk-fake0123456789abcdef0123456789abcdef"})
+                     tokens={"custom": "sk-fake0123456789abcdef0123456789abcdef"})
     page.set_viewport_size({"width": APP_WIDTH, "height": APP_HEIGHT})
     page.wait_for_timeout(200)
 

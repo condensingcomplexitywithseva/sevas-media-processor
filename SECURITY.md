@@ -96,7 +96,7 @@ It is launched by its full path, never by a bare name Windows would resolve
 through its search order. The two links in the About dialog open in your
 default web browser, through Python's `webbrowser` module —
 `src/routes/about_api.py`; it opens only the two addresses listed in
-`src/version.py`, and only when you click one. The export buttons start no
+`src/version.py` and `src/edition.py`, and only when you click one. The export buttons start no
 program: they ask the Windows Shell to show the exported file, or the newest
 log in the logs folder, selected in an Explorer window
 (`SHOpenFolderAndSelectItems`, `src/windows_shell.py`), which can show items

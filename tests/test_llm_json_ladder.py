@@ -21,7 +21,7 @@ from schemas import ConfigurationError
 
 from fake_llm import make_server
 from fake_llm.generic import GenericServer, openai_reply
-from fake_llm.harness import KEY_SHAPED_TOKENS, build_client, wire_provider  # noqa: F401
+from fake_llm.harness import KEY_SHAPED_TOKENS, REQUEST_FORMATS, build_client, wire_provider  # noqa: F401
 
 _openai_fake_token = KEY_SHAPED_TOKENS["openai"]
 assert _openai_fake_token is not None
@@ -732,10 +732,8 @@ def test_abort_toggle_halts_the_batch_with_outcomes_carried(
 
 
 
-@pytest.mark.parametrize("provider_name", [
-    "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio",
-])
-def test_corrective_retry_is_legal_on_every_shipped_preset(
+@pytest.mark.parametrize("provider_name", REQUEST_FORMATS)
+def test_corrective_retry_is_legal_in_every_request_format(
         provider_name, make_jpegs):
     srv = make_server(provider_name, answer="never json, sorry").start()
     try:

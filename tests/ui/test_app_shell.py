@@ -210,17 +210,6 @@ def test_approved_roles_and_shared_component_gallery(open_page, tmp_path):
         page.evaluate("clearNotice('export')")
 
 
-    for language in locales:
-        page.evaluate('changeLanguage', language)
-        page.evaluate("goToField('LLM_PROVIDERS.openai.max_tokens')")
-        page.wait_for_function("document.activeElement.name === 'LLM_PROVIDERS.openai.max_tokens'")
-        assert page.locator('[data-notice-id="provider-inspection"]').is_visible()
-        assert page.locator('#max_tok_openai').evaluate('el => el.readOnly')
-        assert_role_reference(page)
-        page.screenshot(path=str(tmp_path / ('inspection-gallery-' + language + '.png')))
-        page.locator('[data-notice-id="provider-inspection"] button').click()
-
-
 def test_style_reference_detects_shared_and_private_changes(open_page):
     import pytest
     page = open_page({})

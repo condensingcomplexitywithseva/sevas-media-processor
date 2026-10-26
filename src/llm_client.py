@@ -19,7 +19,8 @@ import os
 import re
 
 from config_loader import get_env_tokens
-from config_validator import NON_IDENTITY_PROVIDER_FIELDS, ProviderConfig, parse_output_columns
+from config_validator import (NON_IDENTITY_PROVIDER_FIELDS, ProviderConfig, parse_output_columns,
+                              provider_needs_token, token_env_key)
 from fs_utils import get_safe_path, read_prompt
 from schemas import AnswerRow, RequestOutcome, RequestStatus, ConfigurationError
 import contextlib
@@ -212,12 +213,12 @@ class LLMClient:
             settings.LLM_USER_PROMPT_MODE
         )
 
-        token_env_key = f"{settings.LLM_PROVIDER.upper().replace('-', '_')}_TOKEN"
+        token_name = token_env_key(settings.LLM_PROVIDER)
 
-        live_token = token or get_env_tokens().get(token_env_key)
-        self.active_security_token = live_token or os.environ.get(token_env_key)
+        live_token = token or get_env_tokens().get(token_name)
+        self.active_security_token = live_token or os.environ.get(token_name)
 
-        if not self.active_security_token and settings.LLM_PROVIDER not in ["ollama", "lm-studio", "custom"]:
+        if not self.active_security_token and provider_needs_token(settings.LLM_PROVIDER):
             network_client_logger.warning(
                 f"No API key detected for {settings.LLM_PROVIDER}. "
                 f"Client may encounter HTTP 401 Unauthorized errors.")

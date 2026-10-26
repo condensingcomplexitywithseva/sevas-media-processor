@@ -6,6 +6,8 @@ import json
 import pytest
 from PIL import Image
 
+from fake_llm.harness import ready_ai
+
 RETRIES_FIELD = 'input[name="LLM_MAX_RETRIES"]'
 
 GARBAGE_RETRIES = {"LLM_MAX_RETRIES": "abc"}
@@ -26,10 +28,7 @@ def test_ai_off_scalar_garbage_shows_nothing(open_page):
 
 
 def test_toggling_ai_on_surfaces_scalar_garbage(open_page):
-    page = open_page(
-        {"ENABLE_LLM_INFERENCE": False, "LLM_PROVIDER": "openai", **GARBAGE_RETRIES},
-        tokens={"openai": "sk-fake0123456789abcdef0123456789abcdef"},
-    )
+    page = open_page({**ready_ai(), "ENABLE_LLM_INFERENCE": False, **GARBAGE_RETRIES})
     assert not page.evaluate(
         "getComputedStyle(document.getElementById('global-error-banner')).display !== 'none'"
     ), "sanity: clean start while AI is off"
@@ -49,7 +48,7 @@ def test_toggling_ai_on_surfaces_scalar_garbage(open_page):
     )
     assert state["banner_visible"], "AI on: the dormant garbage must now block Apply"
     assert state["errors"] == ["LLM_MAX_RETRIES"], \
-        "with a token present the ONLY error is the scalar under test"
+        "with a complete provider the ONLY error is the scalar under test"
 
     page.click('[data-tab="ai"]')
     page.wait_for_timeout(400)
@@ -65,7 +64,7 @@ def test_toggling_ai_on_surfaces_scalar_garbage(open_page):
 
 
 
-@pytest.mark.parametrize("providers", [None, {"ollama": {"max_tokens": "abc", "url": None}, "future": {"empty": {}}}])
+@pytest.mark.parametrize("providers", [None, {"custom": {"max_tokens": "abc", "url": None}, "future": {"empty": {}}}])
 def test_broken_ai_settings_survive_apply_and_a_complete_ai_off_run(open_page, tmp_path, monkeypatch, providers):
     import app_context
 

@@ -11,8 +11,9 @@ from routes.export_api import exports_bp
 from routes.about_api import about_bp
 from config_loader import (Settings, ROOT_DIR, get_env_file_path, get_masked_env_tokens,
                            get_app_data_dir, get_settings_path, settings_transaction)
-from config_validator import ProviderConfig, settings_form_view, settings_form_repair_fields
-from version import APP_VERSION, APP_LINKS
+from config_validator import (LOCAL_PROVIDERS, ProviderConfig, settings_form_view,
+                              settings_form_repair_fields)
+from version import APP_VERSION_LABEL, APP_LINKS
 from schemas import MESSAGE_REFERENCES
 
 SESSION_TOKEN = secrets.token_urlsafe(32)
@@ -145,7 +146,8 @@ def create_app():
             initial_errors=initial_errors,
             field_meta=field_meta,
             provider_field_kinds=provider_field_kinds,
-            app_version=APP_VERSION,
+            local_providers=LOCAL_PROVIDERS,
+            app_version_label=APP_VERSION_LABEL,
             app_links=APP_LINKS,
         )
 

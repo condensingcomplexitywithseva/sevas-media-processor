@@ -15,6 +15,9 @@ sys.path.insert(0, str(SRC))
 from config_loader import ConfigManager, TokenManager
 from schemas import ConfigurationError
 from config_validator import Settings
+from fake_llm.harness import READY_ENTRY, ready_ai
+
+LEFT_OVER = "left-over-provider"
 
 
 
@@ -109,31 +112,22 @@ def test_path_overlap_flagged(mgr, tmp_path):
     assert errors["INPUT_FOLDER_PATH"]["value"] == "err_path_overlap"
 
 
-def test_llm_enabled_requires_token(mgr, tmp_path):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai"))
-    assert errors.get("ENV_TOKENS.openai") == {"type": "i18n", "value": "err_missing_token"}
-    assert "ENABLE_LLM_INFERENCE" not in errors
-
-
 def test_llm_incomplete_ai_never_blames_mode_field(mgr, tmp_path):
     cases = [
         ({"LLM_PROVIDER": "custom"}, "LLM_PROVIDERS.custom.url"),
         ({"LLM_PROVIDER": "custom"}, "LLM_PROVIDERS.custom.model"),
-        ({"LLM_PROVIDER": "ollama", "LLM_USER_PROMPT": " "}, "LLM_USER_PROMPT"),
-        ({"LLM_PROVIDER": "ollama", "LLM_SYSTEM_PROMPT": " "}, "LLM_SYSTEM_PROMPT"),
-        ({"LLM_PROVIDER": "openai"}, "ENV_TOKENS.openai"),
+        ({**ready_ai(), "LLM_USER_PROMPT": " "}, "LLM_USER_PROMPT"),
+        ({**ready_ai(), "LLM_SYSTEM_PROMPT": " "}, "LLM_SYSTEM_PROMPT"),
     ]
     for overrides, expected_key in cases:
         errors, _ = validate(mgr, base_paths(
-            tmp_path, ENABLE_LLM_INFERENCE=True, **overrides))
+            tmp_path, **{"ENABLE_LLM_INFERENCE": True, **overrides}))
         assert expected_key in errors, (overrides, errors)
         assert "ENABLE_LLM_INFERENCE" not in errors, (overrides, errors)
 
 
-def test_llm_local_provider_fully_configured_is_clean(mgr, tmp_path):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama"))
+def test_a_complete_provider_without_a_token_is_clean(mgr, tmp_path):
+    errors, _ = validate(mgr, base_paths(tmp_path, **ready_ai()))
     assert errors == {}
 
 
@@ -147,8 +141,8 @@ PADDED_PROVIDER = {
 
 def test_a_run_uses_single_line_settings_without_surrounding_spaces(mgr, tmp_path):
     mgr.settings_path.write_text(json.dumps(base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="lm-studio",
-        LLM_PROVIDERS={"lm-studio": PADDED_PROVIDER},
+        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="custom",
+        LLM_PROVIDERS={"custom": PADDED_PROVIDER},
         INPUT_FOLDER_PATH=f" {tmp_path / 'input'} ",
         OUTPUT_FOLDER_PATH=f"{tmp_path / 'output'} ")), encoding="utf-8")
     settings = mgr.load_strict()
@@ -160,10 +154,8 @@ def test_a_run_uses_single_line_settings_without_surrounding_spaces(mgr, tmp_pat
 
 
 def test_inner_spaces_and_the_max_tokens_field_rule_are_unchanged(mgr, tmp_path):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama",
-        LLM_PROVIDERS={"ollama": {"max_tokens_field": "max tokens"}}))
-    assert errors["LLM_PROVIDERS.ollama.max_tokens_field"]["value"] == "err_max_tokens_field_invalid"
+    errors, _ = validate(mgr, base_paths(tmp_path, **ready_ai(max_tokens_field="max tokens")))
+    assert errors["LLM_PROVIDERS.custom.max_tokens_field"]["value"] == "err_max_tokens_field_invalid"
     from config_validator import ProviderConfig
     assert ProviderConfig(url="u", model=" my model ").model == "my model"
     folder = Settings.model_validate({"INPUT_FOLDER_PATH": " my media "}).INPUT_FOLDER_PATH
@@ -175,8 +167,7 @@ def test_paths_pasted_with_copy_as_path_validate_as_the_paths(mgr, tmp_path):
     prompt.write_text("Read the total.", encoding="utf-8")
     errors, _ = validate(mgr, base_paths(
         tmp_path, INPUT_FOLDER_PATH=f'"{tmp_path / "input"}"',
-        OUTPUT_FOLDER_PATH=f'"{tmp_path / "output"}"',
-        ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama",
+        OUTPUT_FOLDER_PATH=f'"{tmp_path / "output"}"', **ready_ai(),
         LLM_USER_PROMPT_MODE="FILE", LLM_USER_PROMPT=f' "{prompt}" '))
     assert errors == {}
     folder = Settings.model_validate({"OUTPUT_FOLDER_PATH": f'"{tmp_path / "output"}"'}).OUTPUT_FOLDER_PATH
@@ -185,60 +176,14 @@ def test_paths_pasted_with_copy_as_path_validate_as_the_paths(mgr, tmp_path):
 
 def test_llm_mode_type_error_still_surfaces(mgr, tmp_path):
     errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE="banana", LLM_PROVIDER="openai"))
+        tmp_path, ENABLE_LLM_INFERENCE="banana", LLM_PROVIDER="custom"))
     assert "ENABLE_LLM_INFERENCE" in errors
-
-
-def test_load_strict_blocks_run_on_missing_token(mgr, tmp_path):
-    mgr.settings_path.write_text(json.dumps(base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai")),
-        encoding="utf-8")
-    with pytest.raises(ConfigurationError) as refused:
-        mgr.load_strict()
-    assert refused.value.setting_field == "ENV_TOKENS.openai"
-
-
-def test_draft_empty_token_string_means_no_change(mgr, tmp_path, monkeypatch):
-    monkeypatch.setattr(mgr, "get_env_tokens", lambda: {"OPENAI_TOKEN": "stored-secret"})
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai",
-        ENV_TOKENS={"openai": ""}))
-    assert not any(k.startswith("ENV_TOKENS") for k in errors), errors
-
-
-def test_masked_token_value_means_no_change(mgr, tmp_path, monkeypatch):
-    monkeypatch.setattr(mgr, "get_env_tokens", lambda: {"OPENAI_TOKEN": "stored-secret"})
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai",
-        ENV_TOKENS={"openai": "********"}))
-    assert not any(k.startswith("ENV_TOKENS") for k in errors), errors
-
-
-def test_draft_token_entry_satisfies_validation(mgr, tmp_path):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai",
-        ENV_TOKENS={"openai": "sk-new"}))
-    assert not any(k.startswith("ENV_TOKENS") for k in errors), errors
-
-
-def test_environment_variable_counts_as_token(mgr, tmp_path, monkeypatch):
-    monkeypatch.setenv("OPENAI_TOKEN", "from-env")
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="openai"))
-    assert not any(k.startswith("ENV_TOKENS") for k in errors), errors
-
-
-def test_llm_local_provider_needs_no_token(mgr, tmp_path):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True, LLM_PROVIDER="ollama"))
-    assert not any(k.startswith("ENV_TOKENS") for k in errors), errors
 
 
 def test_llm_prompt_file_missing_flagged(mgr, tmp_path):
     errors, _ = validate(mgr, base_paths(
         tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="ollama",
+        **ready_ai(),
         LLM_USER_PROMPT_MODE="FILE",
         LLM_USER_PROMPT=str(tmp_path / "missing.txt"),
     ))
@@ -254,8 +199,7 @@ def test_llm_prompt_file_that_is_not_text_flagged_as_unreadable(mgr, tmp_path, p
     bad.write_bytes(payload_bytes)
     errors, _ = validate(mgr, base_paths(
         tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="ollama",
+        **ready_ai(),
         LLM_USER_PROMPT_MODE="FILE",
         LLM_USER_PROMPT=str(bad),
     ))
@@ -278,8 +222,7 @@ def test_prompt_file_check_uses_the_long_path_spelling(mgr, tmp_path, monkeypatc
     prompt.write_text("say hi", encoding="utf-8")
     errors, _ = validate(mgr, base_paths(
         tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="ollama",
+        **ready_ai(),
         LLM_USER_PROMPT_MODE="FILE",
         LLM_USER_PROMPT=str(prompt),
     ))
@@ -289,20 +232,20 @@ def test_prompt_file_check_uses_the_long_path_spelling(mgr, tmp_path, monkeypatc
 
 def test_llm_disabled_skips_ai_checks(mgr, tmp_path):
     errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDER="openai"))
+        tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDER="custom"))
     assert errors == {}
 
 
 def test_update_tokens_empty_string_deletes(tmp_path, monkeypatch):
     from config_loader import TokenManager
-    monkeypatch.delenv("OPENAI_TOKEN", raising=False)
+    monkeypatch.delenv("CUSTOM_TOKEN", raising=False)
     tm = TokenManager(tmp_path / ".env")
-    tm.update_tokens({"openai": "sk-x"})
-    assert tm.get_tokens() == {"OPENAI_TOKEN": "sk-x"}
-    assert os.environ.get("OPENAI_TOKEN") == "sk-x"
-    tm.update_tokens({"openai": ""})
+    tm.update_tokens({"custom": "sk-x"})
+    assert tm.get_tokens() == {"CUSTOM_TOKEN": "sk-x"}
+    assert os.environ.get("CUSTOM_TOKEN") == "sk-x"
+    tm.update_tokens({"custom": ""})
     assert tm.get_tokens() == {}
-    assert "OPENAI_TOKEN" not in os.environ
+    assert "CUSTOM_TOKEN" not in os.environ
 
 
 
@@ -387,7 +330,7 @@ def test_save_excludes_env_tokens_and_next_load_sees_new_state(mgr, tmp_path):
     mgr.settings_path.write_text(json.dumps(base_paths(tmp_path)), encoding="utf-8")
     load_ui(mgr)
     obj = Settings(**base_paths(tmp_path, JPEG_QUALITY=42,
-                                ENV_TOKENS={"openai": "secret"}))
+                                ENV_TOKENS={"custom": "secret"}))
     mgr.save_settings(obj)
     on_disk = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
     assert "ENV_TOKENS" not in on_disk
@@ -398,84 +341,59 @@ def test_save_excludes_env_tokens_and_next_load_sees_new_state(mgr, tmp_path):
 
 
 
+def with_left_over(**entry_overrides) -> dict:
+    values = ready_ai(**entry_overrides)
+    values["LLM_PROVIDERS"][LEFT_OVER] = {"max_tokens": "abc"}
+    return values
+
+
 def test_garbage_in_non_selected_provider_is_ignored(mgr, tmp_path):
-    errors, merged = validate(mgr, base_paths(
-        tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="openai",
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
-        ENV_TOKENS={"openai": "sk-fake0123456789abcdef0123456789abcdef"},
-    ))
+    errors, merged = validate(mgr, base_paths(tmp_path, **with_left_over()))
     assert errors == {}
-    assert merged["LLM_PROVIDERS"]["claude"]["max_tokens"] == "abc"
+    assert merged["LLM_PROVIDERS"][LEFT_OVER]["max_tokens"] == "abc"
 
 
 def test_garbage_in_selected_provider_is_flagged_on_its_field(mgr, tmp_path):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="claude",
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
-        ENV_TOKENS={"claude": "sk-ant-fake0123456789abcdefABCDEF"},
-    ))
-    assert "LLM_PROVIDERS.claude.max_tokens" in errors
-    assert "ENV_TOKENS.claude" not in errors
+    errors, _ = validate(mgr, base_paths(tmp_path, **ready_ai(max_tokens="abc")))
+    assert set(errors) == {"LLM_PROVIDERS.custom.max_tokens"}
 
 
 def test_ai_off_disables_all_provider_validation(mgr, tmp_path):
     errors, _ = validate(mgr, base_paths(
         tmp_path,
         ENABLE_LLM_INFERENCE=False,
-        LLM_PROVIDER="claude",
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
+        LLM_PROVIDER="custom",
+        LLM_PROVIDERS={"custom": {"max_tokens": "abc"}},
     ))
     assert errors == {}
 
 
 def test_enabling_ai_surfaces_the_dormant_garbage(mgr, tmp_path):
-    payload = base_paths(
-        tmp_path,
-        LLM_PROVIDER="claude",
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
-        ENV_TOKENS={"claude": "sk-ant-fake0123456789abcdefABCDEF"},
-    )
+    payload = base_paths(tmp_path, **ready_ai(max_tokens="abc"))
     errors_off, _ = validate(mgr, {**payload, "ENABLE_LLM_INFERENCE": False})
     errors_on, _ = validate(mgr, {**payload, "ENABLE_LLM_INFERENCE": True})
     assert errors_off == {}
-    assert "LLM_PROVIDERS.claude.max_tokens" in errors_on
+    assert "LLM_PROVIDERS.custom.max_tokens" in errors_on
 
 
 def test_load_strict_runs_despite_broken_non_selected_provider(mgr, tmp_path):
-    mgr.get_env_tokens = lambda: {"OPENAI_TOKEN": "sk-fake0123456789abcdef0123456789abcdef"}
-    mgr.settings_path.write_text(json.dumps(base_paths(
-        tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="openai",
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
-    )), encoding="utf-8")
+    mgr.settings_path.write_text(json.dumps(base_paths(tmp_path, **with_left_over())),
+                                 encoding="utf-8")
     settings = mgr.load_strict()
-    assert settings.LLM_PROVIDERS["claude"]["max_tokens"] == "abc"
-    assert settings.ACTIVE_PROVIDER_CONFIG.url == "https://api.openai.com/v1/chat/completions"
+    assert settings.LLM_PROVIDERS[LEFT_OVER]["max_tokens"] == "abc"
+    assert settings.ACTIVE_PROVIDER_CONFIG.url == READY_ENTRY["url"]
 
 
 def test_saving_preserves_non_selected_garbage_verbatim(mgr, tmp_path):
-    settings_obj, errors, _ = mgr.validate_draft(base_paths(
-        tmp_path,
-        ENABLE_LLM_INFERENCE=True,
-        LLM_PROVIDER="openai",
-        LLM_PROVIDERS={"claude": {"max_tokens": "abc"}},
-        ENV_TOKENS={"openai": "sk-fake0123456789abcdef0123456789abcdef"},
-    ))
+    settings_obj, errors, _ = mgr.validate_draft(base_paths(tmp_path, **with_left_over()))
     assert errors == {}
     mgr.save_settings(settings_obj)
     on_disk = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
-    assert on_disk["LLM_PROVIDERS"]["claude"]["max_tokens"] == "abc"
-    assert on_disk["LLM_PROVIDERS"] == {"claude": {"max_tokens": "abc"}}
+    assert on_disk["LLM_PROVIDERS"] == {"custom": READY_ENTRY, LEFT_OVER: {"max_tokens": "abc"}}
     from config_validator import settings_form_view
     view, _ = mgr.load_for_ui()
-    assert set(settings_form_view(view)["LLM_PROVIDERS"]) == {
-        "openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio", "custom",
-    }
+    providers = set(settings_form_view(view)["LLM_PROVIDERS"])
+    assert "custom" in providers and LEFT_OVER not in providers
 
 
 
@@ -502,9 +420,7 @@ def test_ai_off_scalar_garbage_is_dormant(mgr, tmp_path, overrides, field):
 
 @_pytest.mark.parametrize("overrides,field", SCALAR_GARBAGE_CASES)
 def test_ai_on_surfaces_each_scalar_error(mgr, tmp_path, overrides, field):
-    errors, _ = validate(mgr, base_paths(
-        tmp_path, ENABLE_LLM_INFERENCE=True,
-        ENV_TOKENS={"openai": "sk-fake0123456789abcdef0123456789abcdef"}, **overrides))
+    errors, _ = validate(mgr, base_paths(tmp_path, **{**ready_ai(), **overrides}))
     assert any(k == field or k.startswith(field + ".") for k in errors), \
         (overrides, errors)
 
@@ -532,7 +448,7 @@ def test_ai_off_apply_stores_garbage_verbatim(mgr, tmp_path):
 def test_ai_off_save_never_leaks_tokens(mgr, tmp_path):
     settings_obj, errors, _ = mgr.validate_draft(base_paths(
         tmp_path, ENABLE_LLM_INFERENCE=False,
-        ENV_TOKENS={"openai": "sk-secret"}))
+        ENV_TOKENS={"custom": "sk-secret"}))
     assert errors == {}
     mgr.save_settings(settings_obj)
     on_disk = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
@@ -549,8 +465,7 @@ def test_load_strict_runs_with_ai_garbage_on_disk(mgr, tmp_path):
 
 
 def test_enabling_ai_surfaces_dormant_scalar_garbage(mgr, tmp_path):
-    payload = base_paths(tmp_path, LLM_MAX_RETRIES="abc",
-                         ENV_TOKENS={"openai": "sk-fake0123456789abcdef0123456789abcdef"})
+    payload = base_paths(tmp_path, LLM_MAX_RETRIES="abc", **ready_ai())
     errors_off, _ = validate(mgr, {**payload, "ENABLE_LLM_INFERENCE": False})
     errors_on, _ = validate(mgr, {**payload, "ENABLE_LLM_INFERENCE": True})
     assert errors_off == {}
@@ -615,23 +530,21 @@ PRESERVED_PROVIDER_ENTRIES = [
 ]
 
 
-@pytest.mark.parametrize("provider",
-                         ["openai", "claude", "gemini", "deepseek", "mistral", "zai", "ollama", "lm-studio",
-                          "custom"])
 @pytest.mark.parametrize("ai_enabled", [False, True])
 @pytest.mark.parametrize("entry", PRESERVED_PROVIDER_ENTRIES)
-def test_inactive_provider_whole_entry_roundtrip(mgr, tmp_path, provider, ai_enabled, entry):
+def test_inactive_provider_whole_entry_roundtrip(mgr, tmp_path, ai_enabled, entry):
     import copy
-    selected = "lm-studio" if provider == "ollama" else "ollama"
-    raw = base_paths(tmp_path, ENABLE_LLM_INFERENCE=ai_enabled, LLM_PROVIDER=selected,
-                     LLM_PROVIDERS={provider: copy.deepcopy(entry)})
+    raw = base_paths(tmp_path, **ready_ai())
+    raw["ENABLE_LLM_INFERENCE"] = ai_enabled
+    raw["LLM_PROVIDERS"][LEFT_OVER] = copy.deepcopy(entry)
     before = json.dumps(raw, sort_keys=True)
     obj, errors, _ = mgr.validate_draft(raw)
     assert errors == {}
     assert obj is not None
     mgr.save_settings(obj)
     saved = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
-    assert json.dumps(saved["LLM_PROVIDERS"], sort_keys=True) == json.dumps({provider: entry}, sort_keys=True)
+    assert json.dumps(saved["LLM_PROVIDERS"], sort_keys=True) == json.dumps(
+        {"custom": READY_ENTRY, LEFT_OVER: entry}, sort_keys=True)
     assert json.dumps(raw, sort_keys=True) == before
     loaded = mgr.load_strict()
     assert loaded.ACTIVE_PROVIDER_CONFIG.model
@@ -640,7 +553,7 @@ def test_inactive_provider_whole_entry_roundtrip(mgr, tmp_path, provider, ai_ena
     assert json.loads(mgr.settings_path.read_text(encoding="utf-8")) == saved
 
 
-@pytest.mark.parametrize("selected", ["ollama", "claude"])
+@pytest.mark.parametrize("selected", ["custom", LEFT_OVER])
 def test_ai_off_preserves_all_supplied_ai_data(mgr, tmp_path, selected):
     raw = base_paths(tmp_path, ENABLE_LLM_INFERENCE=False, LLM_PROVIDER=selected,
                      LLM_PROVIDERS={selected: {"max_tokens": "123", "require_max_tokens": "false"}},
@@ -659,12 +572,12 @@ def test_retirement_is_independent_of_provider_validation(mgr, tmp_path, monkeyp
     import config_validator
     monkeypatch.setattr(config_validator, "RETIRED_PROVIDER_FIELDS", frozenset({"old_field"}))
     raw = base_paths(tmp_path, ENABLE_LLM_INFERENCE=False,
-                     LLM_PROVIDERS={"claude": {**entry, "old_field": {"bad": []}, "future": {}}})
+                     LLM_PROVIDERS={"custom": {**entry, "old_field": {"bad": []}, "future": {}}})
     obj, errors, _ = mgr.validate_draft(raw)
     assert not errors and obj is not None
     mgr.save_settings(obj)
     saved = json.loads(mgr.settings_path.read_text(encoding="utf-8"))
-    assert saved["LLM_PROVIDERS"] == {"claude": {**entry, "future": {}}}
+    assert saved["LLM_PROVIDERS"] == {"custom": {**entry, "future": {}}}
 
 
 def test_explicit_assignment_after_loading_materializes_only_that_ai_field(mgr, tmp_path):

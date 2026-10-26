@@ -151,7 +151,7 @@ Example: 'vendor: the shop name as printed; total: the amount paid, digits only;
                     <input type="text" id="prov_url_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.url" value="{{ provider_config.url }}">
                     <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.url", {{ default_settings.LLM_PROVIDERS[provider_key].url | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
                 </div>
-                <span class="hint" data-i18n="hint_prov_url" data-i18n-args='{"provider": "{{ provider_key }}"}'>The official API endpoint address for {{ provider_key }}. For local providers (like LM Studio or Ollama), this is usually a localhost address (e.g., http://localhost:1234/v1/chat/completions).</span>
+                <span class="hint" data-i18n="hint_prov_url">The full address the requests are sent to, for example 'https://ai.example.com/v1/chat/completions'. For an AI running on this computer, use a localhost address.</span>
                 <div id="err-LLM_PROVIDERS.{{ provider_key }}.url" class="error-text" data-field-error></div>
             </div>
 
@@ -161,8 +161,8 @@ Example: 'vendor: the shop name as printed; total: the amount paid, digits only;
                     <input type="text" id="prov_model_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.model" value="{{ provider_config.model }}">
                     <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.model", {{ default_settings.LLM_PROVIDERS[provider_key].model | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
                 </div>
-                <span class="hint" data-i18n="hint_prov_model" data-i18n-args='{"provider": "{{ provider_key }}"}'>The exact identifier for the {{ provider_key }} model you wish to use (e.g., 'gpt-5.6' or 'claude-sonnet-5'). Ensure this matches the provider's official model list perfectly to avoid routing errors.</span>
-                {% if provider_key in ('ollama', 'lm-studio') %}
+                <span class="hint" data-i18n="hint_prov_model">The model's exact name, as the AI service lists it, for example 'model-name' or 'provider/model-name'. The service refuses a misspelled name.</span>
+                {% if provider_key in local_providers %}
                 <span class="hint" data-i18n="hint_local_context">Local servers start with a small context window (Ollama and LM Studio: 4096 tokens), and one image costs about 2,500 tokens. Raise the context length in the server itself (Ollama: OLLAMA_CONTEXT_LENGTH; LM Studio: the model's load settings) or set {images} to 1. These details change between versions: search online for the current way to set it.</span>
                 {% endif %}
                 <div id="err-LLM_PROVIDERS.{{ provider_key }}.model" class="error-text" data-field-error></div>
@@ -171,7 +171,6 @@ Example: 'vendor: the shop name as printed; total: the amount paid, digits only;
             <div class="form-group">
                 <label data-i18n="lbl_prov_token">API Token:</label>
                 <div class="input-row ui-width-full">
-                    {% set token_key = provider_key.upper().replace('-', '_') ~ '_TOKEN' %}
                     <input type="password" id="prov_token_{{ provider_key }}" name="ENV_TOKENS.{{ provider_key }}" 
                            placeholder="{% if provider_key in env_tokens %}********{% else %}Enter token here...{% endif %}"
                            {% if provider_key not in env_tokens %}data-i18n-placeholder="placeholder_token"{% endif %}>
@@ -251,7 +250,7 @@ The ceiling on the reply length in tokens (pieces of words), the model's thinkin
                     <input type="text" id="max_tok_field_{{ provider_key }}" name="LLM_PROVIDERS.{{ provider_key }}.max_tokens_field" value="{{ provider_config.max_tokens_field }}">
                     <button type="button" class="btn-default" onclick='resetDefaultByName("LLM_PROVIDERS.{{ provider_key }}.max_tokens_field", {{ default_settings.LLM_PROVIDERS[provider_key].max_tokens_field | tojson }})' title="Reset to default"><span data-i18n="btn_default">Default</span></button>
                 </div>
-                <span class="hint" data-i18n="hint_max_tokens_field" data-i18n-refs='{"setting": "LLM_PROVIDERS.{{ provider_key }}.require_max_tokens"}'>The request field that carries the ceiling. OpenAI's gpt-5 family rejects 'max_tokens' and wants 'max_completion_tokens'; the other presets use 'max_tokens'. Sent only when {setting} is ticked.</span>
+                <span class="hint" data-i18n="hint_max_tokens_field" data-i18n-refs='{"setting": "LLM_PROVIDERS.{{ provider_key }}.require_max_tokens"}'>The request field that carries the ceiling: 'max_tokens' for most services; some want 'max_completion_tokens'. Sent only when {setting} is ticked.</span>
                 <div id="err-LLM_PROVIDERS.{{ provider_key }}.max_tokens_field" class="error-text" data-field-error></div>
             </div>
 
@@ -308,7 +307,7 @@ Anthropic Claude requires it explicitly separated at the 'top_level' of the payl
                 </div>
                 <span class="hint" data-i18n="hint_reasoning">Determines how AI reasoning is handled:
 • preserve: Keeps all text intact.
-• strip_xml: Removes &lt;think&gt; tags (Ollama/Local).
+• strip_xml: Removes &lt;think&gt; tags (local models).
 • parse_claude_blocks: Filters Anthropic 'thinking' arrays.
 • ignore_api_field: Ignores DeepSeek's dedicated reasoning fields.</span>
                 <div id="err-LLM_PROVIDERS.{{ provider_key }}.reasoning_handling" class="error-text" data-field-error></div>

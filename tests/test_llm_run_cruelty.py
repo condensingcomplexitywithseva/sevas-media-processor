@@ -9,7 +9,6 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import pytest
 from PIL import Image
@@ -21,18 +20,15 @@ if str(SRC) not in sys.path:
 import central_logger
 import llm_client
 from app_context import ProcessorCore
-from config_validator import Settings, _default_provider_configs
+from config_validator import Settings
 RESULTS_REPORT_COLUMNS = ["file_id", "file_path", "file_result", "notes"]
 
 from fake_llm import ContentPolicy, make_server
 from fake_llm.generic import openai_reply
-from fake_llm.harness import KEY_SHAPED_TOKENS
+from fake_llm.harness import REQUEST_FORMATS, format_settings, format_tokens
 
 av = pytest.importorskip("av")
 np = pytest.importorskip("numpy")
-
-DIALECT_PRESETS = ["openai", "claude", "gemini", "deepseek", "mistral",
-                   "zai", "ollama", "lm-studio"]
 HMS = re.compile(r"^\d{2,}:\d{2}:\d{2}\.\d{2}$")
 
 
@@ -73,23 +69,17 @@ def make_video(path, total_frames=20, fps=10):
     return path
 
 
-def point_tokens_at_the_fake(monkeypatch, provider):
-    token = KEY_SHAPED_TOKENS.get(provider)
-    env_key = f"{provider.upper().replace('-', '_')}_TOKEN"
-    monkeypatch.setattr(llm_client, "get_env_tokens",
-                        lambda: {env_key: token} if token else {})
+def point_tokens_at_the_fake(monkeypatch, request_format):
+    tokens = format_tokens(request_format)
+    monkeypatch.setattr(llm_client, "get_env_tokens", lambda: dict(tokens))
 
 
-def settings_for(sandbox, provider, base_url, **overrides) -> Settings:
+def settings_for(sandbox, request_format, base_url, **overrides) -> Settings:
     input_dir, output_dir = sandbox
-    preset = _default_provider_configs()[provider]
-    path = urlparse(preset.url).path or "/"
     values: dict[str, Any] = {
         "INPUT_FOLDER_PATH": str(input_dir),
         "OUTPUT_FOLDER_PATH": str(output_dir),
-        "ENABLE_LLM_INFERENCE": True,
-        "LLM_PROVIDER": provider,
-        "LLM_PROVIDERS": {provider: {"url": base_url.rstrip("/") + path}},
+        **format_settings(request_format, base_url),
         "LLM_MAX_RETRIES": 1,
         "LLM_RETRY_SLEEP_SECONDS": 0,
         "LLM_TIMEOUT_SECONDS": 15,
@@ -281,16 +271,16 @@ def test_resume_after_a_content_failure_retries_the_file(sandbox, monkeypatch):
         ('{"genre": "fixed", "n": 1}',)]
 
 
-@pytest.mark.parametrize("provider_name", DIALECT_PRESETS)
-def test_per_page_happy_path_on_every_preset(sandbox, monkeypatch, provider_name):
+@pytest.mark.parametrize("request_format", REQUEST_FORMATS)
+def test_per_page_happy_path_in_every_request_format(sandbox, monkeypatch, request_format):
     input_dir, _ = sandbox
     make_png(input_dir / "photo.png")
-    point_tokens_at_the_fake(monkeypatch, provider_name)
+    point_tokens_at_the_fake(monkeypatch, request_format)
 
-    srv = make_server(provider_name,
+    srv = make_server(request_format,
                       answer=json.dumps([{"page": 1, "genre": "g", "n": 1}])).start()
     try:
-        settings = settings_for(sandbox, provider_name, srv.base_url,
+        settings = settings_for(sandbox, request_format, srv.base_url,
                                 LLM_OUTPUT_MODE="table_per_page",
                                 LLM_OUTPUT_COLUMNS="genre,n")
         events, db_path = run_core(settings)
@@ -298,7 +288,7 @@ def test_per_page_happy_path_on_every_preset(sandbox, monkeypatch, provider_name
     finally:
         srv.stop()
 
-    assert events[-1] == {"type": "done"}, (provider_name, events[-3:])
+    assert events[-1] == {"type": "done"}, (request_format, events[-3:])
     assert sql(db_path, "SELECT overall_result FROM overall_result") == [("ok",)]
     rows = read_csv(exported_or_fail(settings.TECH_FOLDER_PATH, "llm_answers"))
     assert [(r["llm_genre"], r["llm_n"], r["llm_error"]) for r in rows] == [

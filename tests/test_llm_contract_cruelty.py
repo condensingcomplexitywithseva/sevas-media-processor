@@ -18,7 +18,7 @@ from schemas import ConfigurationError
 
 from fake_llm import make_server
 from fake_llm.generic import openai_reply
-from fake_llm.harness import build_client
+from fake_llm.harness import REQUEST_FORMATS, build_client
 from test_llm_json_ladder import (
     DECLARED_COLUMNS,
     VALID,
@@ -35,10 +35,6 @@ from test_llm_json_ladder import (
     run_reply,
 )
 from fake_llm.generic import GenericServer
-
-DIALECT_PRESETS = ["openai", "claude", "gemini", "deepseek", "mistral",
-                   "zai", "ollama", "lm-studio"]
-
 
 
 @pytest.fixture
@@ -80,8 +76,8 @@ def assistant_text(recorded):
 
 
 @pytest.mark.parametrize("mode", ["table_per_file", "table_per_page"])
-@pytest.mark.parametrize("provider_name", DIALECT_PRESETS)
-def test_message_part_order_on_every_preset(provider_name, mode, make_jpegs):
+@pytest.mark.parametrize("provider_name", REQUEST_FORMATS)
+def test_message_part_order_in_every_request_format(provider_name, mode, make_jpegs):
     srv = make_server(provider_name).start()
     try:
         client = build_client(

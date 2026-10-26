@@ -22,14 +22,14 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import llm_client
-from config_validator import _default_provider_configs
+from config_validator import ProviderConfig
 from llm_client import LLMClient
 from schemas import ConfigurationError
 
 from fake_llm.generic import (
     GenericServer as FakeLLMServer, claude_reply, openai_reply,
 )
-from fake_llm.harness import KEY_SHAPED_TOKENS
+from fake_llm.harness import KEY_SHAPED_TOKENS, REQUEST_FORMATS, format_entry
 
 _openai_fake_token = KEY_SHAPED_TOKENS["openai"]
 assert _openai_fake_token is not None
@@ -331,7 +331,7 @@ def test_local_provider_without_token_sends_no_auth_header(server, jpegs, caplog
         client = make_wire_client(
             server,
             token=None,
-            LLM_PROVIDER="lm-studio",
+            LLM_PROVIDER="custom",
             provider_overrides={"auth_header_key": "", "auth_header_format": ""},
         )
         outcomes = client.execute_network_inference(pages(jpegs[:1]))
@@ -833,14 +833,10 @@ def test_all_images_unreadable_sends_nothing_over_the_wire(server, tmp_path):
 
 
 
-ALL_SHIPPED_PROVIDERS = sorted(_default_provider_configs().keys())
 
-
-@pytest.mark.parametrize("provider_name", ALL_SHIPPED_PROVIDERS)
-def test_every_shipped_provider_preset_round_trips(server, jpegs, provider_name):
-    config = _default_provider_configs()[provider_name].model_copy(
-        update={"url": server.url}
-    )
+@pytest.mark.parametrize("provider_name", REQUEST_FORMATS)
+def test_every_request_format_round_trips(server, jpegs, provider_name):
+    config = ProviderConfig(**format_entry(provider_name, server.url))
 
     marker = f"round-trip answer for {provider_name}"
     reply_text = json.dumps({"answer": marker})
@@ -864,7 +860,7 @@ def test_every_shipped_provider_preset_round_trips(server, jpegs, provider_name)
         LLM_SYSTEM_PROMPT_MODE="TEXT",
         LLM_USER_PROMPT="user prompt",
         LLM_USER_PROMPT_MODE="TEXT",
-        LLM_PROVIDER=provider_name,
+        LLM_PROVIDER="custom",
         LLM_OUTPUT_MODE="table_per_file",
         LLM_OUTPUT_COLUMNS="answer",
         LLM_OUTPUT_COLUMN_INSTRUCTIONS="",

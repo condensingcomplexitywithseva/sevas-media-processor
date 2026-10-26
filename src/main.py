@@ -358,8 +358,8 @@ def main():
         nonlocal backend_error
         try:
             logger = logging.getLogger("SYSTEM")
-            from version import APP_VERSION
-            logger.info(f"Seva's Media Processor v{APP_VERSION} Engine: Starting backend...")
+            from version import APP_VERSION_LABEL
+            logger.info(f"Seva's Media Processor {APP_VERSION_LABEL} Engine: Starting backend...")
 
             logger.info("Verifying environment and security tokens...")
             load_secure_env()

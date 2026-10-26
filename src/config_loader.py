@@ -24,6 +24,8 @@ from config_validator import (
     Settings,
     SettingsAIDormant,
     resolve_ai_enabled,
+    token_env_key,
+    token_key_provider,
     validate_business_rules,
 )
 from schemas import ConfigurationError
@@ -97,8 +99,7 @@ class TokenManager:
         masked = {}
         for k in tokens:
             if k.endswith("_TOKEN"):
-                provider = k.replace("_TOKEN", "").lower().replace("_", "-")
-                masked[provider] = "********"
+                masked[token_key_provider(k)] = "********"
         return masked
 
     def update_tokens(self, updates: dict) -> None:
@@ -109,7 +110,7 @@ class TokenManager:
             existing_env = self.get_tokens()
             real = real_token_updates(updates)
             for prov, token in updates.items():
-                key = f"{prov.upper().replace('-', '_')}_TOKEN"
+                key = token_env_key(prov)
                 if prov in real:
                     existing_env[key] = real[prov]
                     os.environ[key] = real[prov]
@@ -253,7 +254,7 @@ class ConfigManager:
             if key.endswith("_TOKEN"):
                 current_tokens.setdefault(key, value)
         for prov, token in real_token_updates(raw_data.get("ENV_TOKENS")).items():
-            current_tokens[f"{prov.upper().replace('-', '_')}_TOKEN"] = token
+            current_tokens[token_env_key(prov)] = token
 
         for field_path, err_key in validate_business_rules(merged, current_tokens, ai_enabled):
             errors[field_path] = {"type": "i18n", "value": err_key}

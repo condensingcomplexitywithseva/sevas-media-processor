@@ -519,7 +519,7 @@
             <img src="{{ url_for('static', filename='app_icon_64.png') }}" width="22" height="22" alt="">
             <span class="sidebar-brand-text">
                 <span class="sidebar-brand-name">Seva's Media Processor</span>
-                <span class="sidebar-brand-version">v{{ app_version }}</span>
+                <span class="sidebar-brand-version">{{ app_version_label }}</span>
             </span>
         </div>
     </div>
@@ -665,7 +665,7 @@
                 <img src="{{ url_for('static', filename='app_icon_64.png') }}" width="48" height="48" alt="">
                 <div>
                     <h3>Seva's Media Processor</h3>
-                    <div id="about-version">v{{ app_version }}</div>
+                    <div id="about-version">{{ app_version_label }}</div>
                 </div>
             </div>
             <div class="about-line" data-i18n="lbl_about_built_by">Built by Vsevolod Belonogov</div>
